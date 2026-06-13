@@ -1334,7 +1334,7 @@ export default function App() {
             <div className="grid grid-cols-2 md:grid-cols-4 border-b border-slate-800 bg-slate-950/20 text-center text-xs">
               <div className="p-4 border-r border-slate-800">
                 <span className="block text-[10px] font-black tracking-widest text-slate-500 uppercase">Panel Seleccionado</span>
-                <span className="text-sm font-bold text-cyan-400 truncate block max-w-[200px] mx-auto text-center block">
+                <span className="text-sm font-bold text-cyan-400 truncate block max-w-[200px] mx-auto block">
                   {selectedAdminEvent === 'all' ? 'Todos los Eventos' : selectedAdminEvent}
                 </span>
               </div>

@@ -98,7 +98,7 @@ const brandStyles = {
     gradient: 'from-cyan-400 to-sky-500',
     hoverGradient: 'hover:from-cyan-300 hover:to-sky-400',
     shadowAccent: 'shadow-cyan-400/20',
-    logo: 'image_fb3306.jpg', // Logo de llanero con trofeo
+    logo: '/logoSport.png', // Logo de llanero con trofeo (Ruta absoluta)
     title: 'Sport',
     titleColor: 'text-cyan-400',
     glowBg: 'bg-cyan-500/10',
@@ -119,7 +119,7 @@ const brandStyles = {
     gradient: 'from-red-500 to-rose-600',
     hoverGradient: 'hover:from-red-400 hover:to-rose-500',
     shadowAccent: 'shadow-red-500/20',
-    logo: 'image_fb3325.jpg', // Logo urbano de control gaming
+    logo: '/LogoGaming.png', // Logo urbano de control gaming (Ruta absoluta)
     title: 'Gaming',
     titleColor: 'text-red-500',
     glowBg: 'bg-red-500/10',

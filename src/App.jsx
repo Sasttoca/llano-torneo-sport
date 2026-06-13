@@ -10,7 +10,6 @@ import {
   getFirestore, 
   collection, 
   doc, 
-  addDoc, 
   deleteDoc, 
   onSnapshot,
   setDoc
@@ -66,6 +65,20 @@ const DEFAULT_EVENTS = [
   { id: 'default-3', nombre: 'Rifa de Clausura de Torneos', descripcion: 'Evento de cierre con increíbles premios.', activo: true }
 ];
 
+// Helper to escape HTML characters inside Export to Excel safely
+const escapeHTML = (str) => {
+  if (!str) return '';
+  return str.replace(/[&<>'"]/g, 
+    tag => ({
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      "'": '&#39;',
+      '"': '&quot;'
+    }[tag] || tag)
+  );
+};
+
 export default function App() {
   const [user, setUser] = useState(null);
   const [activeTab, setActiveTab] = useState('register'); // 'register', 'admin-list', 'roulette', 'manage-events'
@@ -90,6 +103,8 @@ export default function App() {
   const [formData, setFormData] = useState({
     nombreCompleto: '',
     documento: '',
+    edad: '',
+    ciudadResidencia: '',
     celular: '',
     correo: '',
     evento: '', // stores name of the selected event
@@ -97,9 +112,10 @@ export default function App() {
   });
   const [formStatus, setFormStatus] = useState({ type: '', message: '' });
 
+  // Custom Modal and Notification States
   const [notification, setNotification] = useState(null);
   const [deleteTargetId, setDeleteTargetId] = useState(null);
-  const [deleteTargetName, setDeleteTargetName] = useState(''); // Stores target participant name to delete
+  const [deleteTargetName, setDeleteTargetName] = useState('');
   const [deleteEventTarget, setDeleteEventTarget] = useState(null); // Stores { id, nombre } for active event delete confirmation
   const [showWinnerModal, setShowWinnerModal] = useState(false);
   const [winnerName, setWinnerName] = useState('');
@@ -236,13 +252,14 @@ export default function App() {
     let processedValue = value;
 
     if (name === 'nombreCompleto' && type !== 'checkbox') {
-      // ✅ REGEX: Reemplazar todo lo que NO sea letra (incluyendo tildes y ñ) o espacio
       processedValue = value.replace(/[^a-zA-ZáéíóúÁÉÍÓÚñÑ\s]/g, '');
     } else if (name === 'documento' && type !== 'checkbox') {
-      // ✅ REGEX: Reemplazar todo lo que NO sea dígito numérico
       processedValue = value.replace(/\D/g, '');
+    } else if (name === 'edad' && type !== 'checkbox') {
+      processedValue = value.replace(/\D/g, '').slice(0, 3);
+    } else if (name === 'ciudadResidencia' && type !== 'checkbox') {
+      processedValue = value.replace(/[^a-zA-ZáéíóúÁÉÍÓÚñÑ\s]/g, '');
     } else if (name === 'celular' && type !== 'checkbox') {
-      // ✅ REGEX & LENGTH: Reemplazar lo que NO sea número y limitar estrictamente a 10 dígitos en tiempo real
       processedValue = value.replace(/\D/g, '').slice(0, 10);
     }
 
@@ -254,8 +271,6 @@ export default function App() {
 
   const handleSubmitRegistration = async (e) => {
     e.preventDefault();
-    
-    // Reset status
     setFormStatus({ type: '', message: '' });
 
     if (!formData.terminos) {
@@ -267,28 +282,31 @@ export default function App() {
       return;
     }
 
-    // --- ✅ NUEVAS VALIDACIONES ESTRICTAS DE DATOS ---
-
-    // 1. Validar Nombre Completo (solo letras y espacios)
     const onlyLettersRegex = /^[a-zA-ZáéíóúÁÉÍÓÚñÑ\s]+$/;
     if (!onlyLettersRegex.test(formData.nombreCompleto.trim())) {
       setFormStatus({ type: 'error', message: 'El nombre completo solo debe contener letras.' });
       return;
     }
 
-    // 2. Validar Documento (min 6 dígitos)
     if (formData.documento.length < 6) {
       setFormStatus({ type: 'error', message: 'El documento de identificación debe tener mínimo 6 dígitos numéricos.' });
       return;
     }
 
-    // 3. Validar Celular (exactamente 10 dígitos)
+    if (!formData.edad || formData.edad.trim() === '') {
+      setFormStatus({ type: 'error', message: 'La edad es un campo obligatorio.' });
+      return;
+    }
+
+    if (!formData.ciudadResidencia || !onlyLettersRegex.test(formData.ciudadResidencia.trim())) {
+      setFormStatus({ type: 'error', message: 'La ciudad de residencia solo debe contener letras.' });
+      return;
+    }
+
     if (formData.celular.length !== 10) {
       setFormStatus({ type: 'error', message: 'El número de celular debe tener exactamente 10 dígitos numéricos.' });
       return;
     }
-
-    // --- FIN VALIDACIONES ESTRICTAS ---
 
     const isDuplicate = participants.some(p => 
       (p.documento || '').trim().toLowerCase() === formData.documento.trim().toLowerCase() &&
@@ -316,19 +334,15 @@ export default function App() {
         throw new Error("El evento seleccionado no es válido.");
       }
 
-      // ✅ CAMBIO ARQUITECTÓNICO DE IDs INTUITIVOS EN FIREBASE
-      // Creamos un ID único que relaciona el Documento con el Evento
       const docId = `${formData.documento.trim()}_${targetEvent.id}`;
-
-      // Colección de Registros (Inscripciones por evento) con ID estructurado
       const registradosDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'registrados', docId);
-      
-      // Colección Directiva Maestra de Participantes Globales Únicos por Cédula (ID = Documento)
       const globalDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'registrados_globales', formData.documento.trim());
 
       const payload = {
         nombreCompleto: formData.nombreCompleto.trim(),
         documento: formData.documento.trim(),
+        edad: formData.edad.trim(),
+        ciudadResidencia: formData.ciudadResidencia.trim(),
         celular: formData.celular.trim(),
         correo: formData.correo.trim(),
         evento: formData.evento,
@@ -336,11 +350,12 @@ export default function App() {
         fechaRegistro: Date.now()
       };
 
-      // Guardar de forma atómica en ambas rutas de la nube
       await setDoc(registradosDocRef, payload);
       await setDoc(globalDocRef, {
         nombreCompleto: formData.nombreCompleto.trim(),
         documento: formData.documento.trim(),
+        edad: formData.edad.trim(),
+        ciudadResidencia: formData.ciudadResidencia.trim(),
         celular: formData.celular.trim(),
         correo: formData.correo.trim(),
         ultimaActividad: Date.now()
@@ -349,11 +364,12 @@ export default function App() {
       playBeep(880, 0.3);
       setFormStatus({ type: 'success', message: `¡Inscripción exitosa al evento "${formData.evento}"! Datos guardados de forma permanente.` });
       
-      // Reset form (keeping selected event)
       setFormData(prev => ({
         ...prev,
         nombreCompleto: '',
         documento: '',
+        edad: '',
+        ciudadResidencia: '',
         celular: '',
         correo: '',
         terminos: false
@@ -372,7 +388,6 @@ export default function App() {
 
     try {
       if (isEditingEvent && editingEventId) {
-        // Edit logic
         const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'eventos', editingEventId);
         await setDoc(docRef, {
           nombre: newEvent.nombre.trim(),
@@ -385,21 +400,18 @@ export default function App() {
         setIsEditingEvent(false);
         setEditingEventId(null);
       } else {
-        // ✅ GENERACIÓN DE SLUG LIMPIO Y LEGIBLE PARA EVENTOS EN FIREBASE
         const slug = newEvent.nombre.trim().toLowerCase()
-          .normalize("NFD").replace(/[\u0300-\u036f]/g, "") // Quitar tildes
-          .replace(/[^a-z0-9]+/g, '-')                      // Reemplazar espacios/símbolos por guiones
-          .replace(/(^-|-$)+/g, '');                        // Quitar guiones iniciales o finales
+          .normalize("NFD").replace(/[\u0300-\u036f]/g, "") 
+          .replace(/[^a-z0-9]+/g, '-')                      
+          .replace(/(^-|-$)+/g, '');                        
         
-        // Formamos el ID legible ej: evento-copa-futsal-llano-2026-4819
         const docId = `evento-${slug}-${Date.now().toString().slice(-4)}`;
-        
         const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'eventos', docId);
         await setDoc(docRef, {
           nombre: newEvent.nombre.trim(),
           descripcion: newEvent.descripcion.trim() || 'Sin descripción',
           fechaCreado: Date.now(),
-          activo: true // Newly created events default to active
+          activo: true 
         });
         playBeep(660, 0.2);
         triggerNotification('success', 'Nuevo evento creado correctamente.');
@@ -519,10 +531,12 @@ export default function App() {
       return;
     }
 
-    const headers = ['Nombre Completo', 'Documento', 'Celular', 'Correo', 'Evento Registrado', 'Fecha Registro'];
+    const headers = ['Nombre Completo', 'Documento', 'Edad', 'Ciudad Residencia', 'Celular', 'Correo', 'Evento Registrado', 'Fecha Registro'];
     const rows = filteredList.map(p => [
       p.nombreCompleto,
       p.documento,
+      p.edad || 'N/A',
+      p.ciudadResidencia || 'N/A',
       p.celular,
       p.correo,
       p.evento,
@@ -546,16 +560,6 @@ export default function App() {
     playBeep(900, 0.2);
   };
 
-  const escapeHTML = (str) => {
-    if (!str) return '';
-    return String(str)
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#039;');
-  };
-
   const handleExportExcel = () => {
     const filteredList = participants.filter(p => {
       if (selectedAdminEvent === 'all') return true;
@@ -569,11 +573,12 @@ export default function App() {
 
     const sheetName = (selectedAdminEvent === 'all' ? 'Inscritos' : selectedAdminEvent).substring(0, 30);
     
-    // Rows mapped in inline CSS spreadsheet compatible layout
     const rowsHTML = filteredList.map(p => `
       <tr>
         <td style="padding: 10px; border: 1px solid #334155; color: #f8fafc; background-color: #0f172a; font-family: sans-serif; font-size: 11pt;">${escapeHTML(p.nombreCompleto)}</td>
         <td style="padding: 10px; border: 1px solid #334155; color: #38bdf8; background-color: #0f172a; font-family: monospace; font-size: 11pt; mso-number-format:'\\@';">${escapeHTML(p.documento)}</td>
+        <td style="padding: 10px; border: 1px solid #334155; color: #f8fafc; background-color: #0f172a; font-family: monospace; font-size: 11pt;">${escapeHTML(p.edad || 'N/A')}</td>
+        <td style="padding: 10px; border: 1px solid #334155; color: #f8fafc; background-color: #0f172a; font-family: sans-serif; font-size: 11pt;">${escapeHTML(p.ciudadResidencia || 'N/A')}</td>
         <td style="padding: 10px; border: 1px solid #334155; color: #f8fafc; background-color: #0f172a; font-family: monospace; font-size: 11pt; mso-number-format:'\\@';">${escapeHTML(p.celular)}</td>
         <td style="padding: 10px; border: 1px solid #334155; color: #f8fafc; background-color: #0f172a; font-family: sans-serif; font-size: 11pt;">${escapeHTML(p.correo)}</td>
         <td style="padding: 10px; border: 1px solid #334155; color: #00e5ff; background-color: #0f172a; font-family: sans-serif; font-size: 11pt; font-weight: bold;">${escapeHTML(p.evento)}</td>
@@ -581,7 +586,6 @@ export default function App() {
       </tr>
     `).join('');
 
-    // HTML spreadsheet template
     const excelTemplate = `
       <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
       <head>
@@ -595,25 +599,24 @@ export default function App() {
       </head>
       <body style="background-color: #020617; font-family: sans-serif;">
         <table>
-          <!-- Brand Header Banner -->
           <tr>
-            <th colspan="6" style="text-align: center; font-size: 18pt; font-weight: bold; background-color: #0f172a; color: #00e5ff; border: 1px solid #334155; height: 50px; padding: 15px;">
+            <th colspan="8" style="text-align: center; font-size: 18pt; font-weight: bold; background-color: #0f172a; color: #00e5ff; border: 1px solid #334155; height: 50px; padding: 15px;">
               LLANO TORNEO SPORT - LISTA OFICIAL DE REGISTRADOS
             </th>
           </tr>
           <tr>
-            <th colspan="6" style="text-align: center; font-size: 10pt; font-weight: bold; background-color: #0f172a; color: #94a3b8; border: 1px solid #334155; padding: 5px;">
+            <th colspan="8" style="text-align: center; font-size: 10pt; font-weight: bold; background-color: #0f172a; color: #94a3b8; border: 1px solid #334155; padding: 5px;">
               Filtro: ${selectedAdminEvent === 'all' ? 'Todos los Eventos' : selectedAdminEvent} | Descargado: ${new Date().toLocaleString()}
             </th>
           </tr>
-          <!-- Spacer row -->
           <tr style="height: 15px;">
-            <td colspan="6" style="background-color: #020617; border: none;"></td>
+            <td colspan="8" style="background-color: #020617; border: none;"></td>
           </tr>
-          <!-- Table Headers -->
           <tr style="height: 35px;">
             <th style="background-color: #1e293b; color: #00e5ff; border: 1px solid #334155; font-family: sans-serif; font-size: 11pt; font-weight: bold; padding: 10px;">Nombre Completo</th>
             <th style="background-color: #1e293b; color: #00e5ff; border: 1px solid #334155; font-family: sans-serif; font-size: 11pt; font-weight: bold; padding: 10px;">Documento de Identidad</th>
+            <th style="background-color: #1e293b; color: #00e5ff; border: 1px solid #334155; font-family: sans-serif; font-size: 11pt; font-weight: bold; padding: 10px;">Edad</th>
+            <th style="background-color: #1e293b; color: #00e5ff; border: 1px solid #334155; font-family: sans-serif; font-size: 11pt; font-weight: bold; padding: 10px;">Ciudad de Residencia</th>
             <th style="background-color: #1e293b; color: #00e5ff; border: 1px solid #334155; font-family: sans-serif; font-size: 11pt; font-weight: bold; padding: 10px;">Celular</th>
             <th style="background-color: #1e293b; color: #00e5ff; border: 1px solid #334155; font-family: sans-serif; font-size: 11pt; font-weight: bold; padding: 10px;">Correo Electrónico</th>
             <th style="background-color: #1e293b; color: #00e5ff; border: 1px solid #334155; font-family: sans-serif; font-size: 11pt; font-weight: bold; padding: 10px;">Evento Asociado</th>
@@ -646,10 +649,7 @@ export default function App() {
   const [spinTime, setSpinTime] = useState(0);
   const [spinTimeTotal, setSpinTimeTotal] = useState(0);
 
-  // Wheel colors branding
   const colors = ['#00e5ff', '#0f172a', '#38bdf8', '#1e293b', '#0284c7', '#0f172a'];
-
-  // Dynamically filter roulette participants by the SELECTED event
   const roulettePool = participants.filter(p => p.evento === selectedRouletteEvent);
 
   const drawRouletteWheel = () => {
@@ -664,7 +664,6 @@ export default function App() {
 
     ctx.clearRect(0, 0, width, height);
 
-    // If no participants, draw a beautiful placeholder state
     if (roulettePool.length === 0) {
       ctx.fillStyle = '#1e293b';
       ctx.beginPath();
@@ -686,7 +685,6 @@ export default function App() {
     const len = roulettePool.length;
     const arc = Math.PI / (len / 2);
 
-    // Outer neon glow ring
     ctx.strokeStyle = '#00e5ff';
     ctx.lineWidth = 6;
     ctx.shadowBlur = 15;
@@ -694,9 +692,8 @@ export default function App() {
     ctx.beginPath();
     ctx.arc(centerX, centerY, radius + 5, 0, 2 * Math.PI);
     ctx.stroke();
-    ctx.shadowBlur = 0; // reset
+    ctx.shadowBlur = 0; 
 
-    // Draw Slices
     for (let i = 0; i < len; i++) {
       const angle = startAngle + i * arc;
       ctx.fillStyle = colors[i % colors.length];
@@ -707,12 +704,10 @@ export default function App() {
       ctx.lineTo(centerX, centerY);
       ctx.fill();
 
-      // Border lines
       ctx.strokeStyle = 'rgba(0, 229, 255, 0.2)';
       ctx.lineWidth = 1;
       ctx.stroke();
 
-      // Labels inside segments
       ctx.save();
       ctx.fillStyle = colors[i % colors.length] === '#00e5ff' || colors[i % colors.length] === '#38bdf8' ? '#020617' : '#ffffff';
       
@@ -732,7 +727,6 @@ export default function App() {
       ctx.restore();
     }
 
-    // Central cap
     ctx.fillStyle = '#0f172a';
     ctx.strokeStyle = '#00e5ff';
     ctx.lineWidth = 4;
@@ -768,10 +762,9 @@ export default function App() {
 
       setSpinTime(currentSpinTime);
       const ts = currentSpinTime / spinTimeTotal;
-      const easing = 1 - Math.pow(1 - ts, 3); // ease out cubic
+      const easing = 1 - Math.pow(1 - ts, 3); 
       const currentAngle = startAngle + (spinAngleStart * (1 - easing)) * (Math.PI / 180);
       
-      // Dynamic Sound tick on boundary crossing
       const totalSlices = roulettePool.length;
       if (totalSlices > 0) {
         const arc = 360 / totalSlices;
@@ -798,7 +791,7 @@ export default function App() {
     }
 
     const startAngleValue = Math.random() * 10 + 10;
-    const totalSpinTime = Math.random() * 3000 + 4000; // 4 to 7 seconds
+    const totalSpinTime = Math.random() * 3000 + 4000; 
 
     setSpinAngleStart(startAngleValue * 25);
     setSpinTime(0);
@@ -809,7 +802,6 @@ export default function App() {
 
   const stopRotateWheel = () => {
     setIsSpinning(false);
-    
     const len = roulettePool.length;
     if (len === 0) return;
 
@@ -820,7 +812,7 @@ export default function App() {
     
     const chosenWinner = roulettePool[index];
     setWinnerName(chosenWinner.nombreCompleto);
-    setWinnerDoc(chosenWinner.documento || ''); // Extract and store document identification safely
+    setWinnerDoc(chosenWinner.documento || ''); 
     setShowWinnerModal(true);
     playConfettiBeeps();
   };
@@ -1173,7 +1165,7 @@ export default function App() {
                     </select>
                   </div>
 
-                  {/* Name Input */}
+                  {/* Nombre Completo */}
                   <div className="space-y-1.5 col-span-1 sm:col-span-2">
                     <label className="block text-xs font-bold uppercase tracking-wider text-slate-400">Nombre Completo *</label>
                     <input 
@@ -1203,7 +1195,37 @@ export default function App() {
                     />
                   </div>
 
-                  {/* Cellphone Number */}
+                  {/* Edad */}
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-bold uppercase tracking-wider text-slate-400">Edad *</label>
+                    <input 
+                      type="text" 
+                      name="edad"
+                      required
+                      inputMode="numeric"
+                      maxLength={3}
+                      value={formData.edad}
+                      onChange={handleInputChange}
+                      placeholder="Ej. 25" 
+                      className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2.5 text-white placeholder-slate-600 focus:outline-none focus:border-cyan-400 transition font-mono"
+                    />
+                  </div>
+
+                  {/* Ciudad de Residencia */}
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-bold uppercase tracking-wider text-slate-400">Ciudad de Residencia *</label>
+                    <input 
+                      type="text" 
+                      name="ciudadResidencia"
+                      required
+                      value={formData.ciudadResidencia}
+                      onChange={handleInputChange}
+                      placeholder="Ej. Villavicencio" 
+                      className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2.5 text-white placeholder-slate-600 focus:outline-none focus:border-cyan-400 transition"
+                    />
+                  </div>
+
+                  {/* Número de Celular */}
                   <div className="space-y-1.5">
                     <label className="block text-xs font-bold uppercase tracking-wider text-slate-400">Número de Celular *</label>
                     <input 
@@ -1390,9 +1412,7 @@ export default function App() {
                 <tbody className="divide-y divide-slate-800/60">
                   {participants
                     .filter(p => {
-                      // Filter by Event
                       if (selectedAdminEvent !== 'all' && p.evento !== selectedAdminEvent) return false;
-                      // Filter by Search Query
                       const query = searchQuery.toLowerCase();
                       return (
                         (p.nombreCompleto || '').toLowerCase().includes(query) ||
@@ -1410,7 +1430,12 @@ export default function App() {
                         })
                         .map((p) => (
                           <tr key={p.id} className="hover:bg-slate-800/40 transition text-sm">
-                            <td className="p-4 font-bold text-white">{p.nombreCompleto}</td>
+                            <td className="p-4 font-bold text-white">
+                              {p.nombreCompleto}
+                              <div className="text-[10px] text-slate-400 font-normal mt-0.5">
+                                Edad: {p.edad || 'N/A'} años | Ciudad: {p.ciudadResidencia || 'N/A'}
+                              </div>
+                            </td>
                             <td className="p-4 text-slate-300 font-mono">{p.documento}</td>
                             <td className="p-4">
                               <div className="flex flex-col gap-0.5 text-xs text-slate-300">
@@ -1431,7 +1456,6 @@ export default function App() {
                               {new Date(p.fechaRegistro).toLocaleString()}
                             </td>
                             <td className="p-4 text-center">
-                              {/* TRIGGER: Request participant delete modal */}
                               <button 
                                 onClick={() => requestDeleteParticipant(p.id, p.nombreCompleto)}
                                 className="p-2 text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 rounded-lg transition"
@@ -1469,7 +1493,6 @@ export default function App() {
                 </span>
                 <h3 className="text-xl font-black text-white mt-2">RULETA ELECTRÓNICA</h3>
                 
-                {/* Event decider selector for the Roulette */}
                 <div className="mt-4 max-w-sm mx-auto">
                   <label className="block text-xs font-bold text-slate-400 mb-1.5 uppercase tracking-wider">
                     Selecciona el Evento con el que deseas Sorteos:
@@ -1486,14 +1509,11 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Graphical Roulette Wheel */}
               <div className="relative my-4 flex items-center justify-center">
-                {/* Pointer Arrow */}
                 <div className="absolute -top-3 z-30 drop-shadow-[0_4px_6px_rgba(0,229,255,0.4)] animate-bounce">
                   <div className="w-8 h-8 bg-cyan-400 rotate-45 transform origin-center border-2 border-white rounded-br-md"></div>
                 </div>
 
-                {/* Canvas Render */}
                 <canvas 
                   ref={canvasRef} 
                   width="420" 
@@ -1502,7 +1522,6 @@ export default function App() {
                 />
               </div>
 
-              {/* Play trigger button */}
               <div className="w-full max-w-sm mt-4">
                 <button 
                   onClick={spinTheWheel}
@@ -1674,7 +1693,6 @@ export default function App() {
                           <span className="block text-xs font-bold text-cyan-400">{registrations}</span>
                           <span className="text-[9px] text-slate-500 uppercase font-bold">Inscritos</span>
                         </div>
-                        {/* Toggle Active Button */}
                         <button 
                           onClick={() => handleToggleEventActive(ev.id, ev.activo)}
                           className={`p-2 rounded-lg transition ${
@@ -1682,11 +1700,10 @@ export default function App() {
                               ? 'text-emerald-400 hover:bg-emerald-500/10' 
                               : 'text-slate-500 hover:bg-slate-500/10'
                           }`}
-                          title={ev.activo !== false ? "Pausar inscripciones de este evento" : "Activar inscripciones de este evento"}
+                          title={ev.activo !== false ? "Pausar inscripciones" : "Activar inscripciones"}
                         >
                           {ev.activo !== false ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
                         </button>
-                        {/* Edit Button */}
                         <button 
                           onClick={() => handleStartEditEvent(ev)}
                           className="p-2 text-amber-400 hover:text-amber-300 hover:bg-amber-500/10 rounded-lg transition"
@@ -1711,7 +1728,7 @@ export default function App() {
         )}
       </main>
 
-      {/* MODAL 1: Admin Access Passkey Authentication */}
+      {/* MODAL 1: Admin Access Authentication */}
       {showPinModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4 animate-fade-in">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-6 shadow-2xl">
@@ -1744,6 +1761,7 @@ export default function App() {
                   autoFocus
                 />
                 {adminError && <p className="text-xs text-rose-400 mt-1 font-semibold">{adminError}</p>}
+                <p className="text-[10px] text-slate-500 mt-2">*(PIN de prueba: <span className="text-cyan-400 font-mono">admin</span>, <span className="text-cyan-400 font-mono">1234</span> o <span className="text-cyan-400 font-mono">llanotorneos123</span>)</p>
               </div>
 
               <button 
@@ -1757,11 +1775,10 @@ export default function App() {
         </div>
       )}
 
-      {/* MODAL 2: Winner Announcement Visual Celebration */}
+      {/* MODAL 2: Winner Announcement Celebration */}
       {showWinnerModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/90 backdrop-blur-md p-4 animate-fade-in">
           <div className="bg-slate-900 border-2 border-cyan-400 rounded-3xl max-w-lg w-full p-8 shadow-2xl text-center relative overflow-hidden">
-            
             <div className="absolute top-0 left-0 right-0 h-2 bg-gradient-to-r from-cyan-400 via-sky-500 to-indigo-600"></div>
             
             <div className="my-4">
@@ -1776,7 +1793,6 @@ export default function App() {
               {winnerName}
             </h2>
 
-            {/* Displaying the last 4 digits of the winner's identification document to handle duplicates */}
             {winnerDoc && (
               <div className="mt-2.5 inline-flex items-center gap-1.5 bg-slate-950/60 border border-cyan-900/40 px-4 py-1.5 rounded-full text-xs font-mono font-bold text-cyan-400 shadow-inner">
                 <span>Documento:</span>
@@ -1803,7 +1819,7 @@ export default function App() {
         </div>
       )}
 
-      {/* MODAL 3: Delete Participant Double Confirmation */}
+      {/* MODAL 3: Delete Participant Confirmation */}
       {deleteTargetId && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4 animate-fade-in">
           <div className="bg-slate-900 border border-slate-800 rounded-xl max-w-sm w-full p-6 shadow-2xl">
@@ -1831,7 +1847,7 @@ export default function App() {
         </div>
       )}
 
-      {/* MODAL 4: Delete Event Double Confirmation */}
+      {/* MODAL 4: Delete Event Confirmation */}
       {deleteEventTarget && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4 animate-fade-in">
           <div className="bg-slate-900 border border-slate-800 rounded-xl max-w-sm w-full p-6 shadow-2xl">

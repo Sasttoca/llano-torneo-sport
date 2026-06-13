@@ -130,6 +130,25 @@ const brandStyles = {
 };
 
 export default function App() {
+  // --- ESTADOS DE PATROCINADORES ---
+  const [showSponsorsModal, setShowSponsorsModal] = useState(false);
+  const [followedSponsors, setFollowedSponsors] = useState([]);
+  const [sponsorsList, setSponsorsList] = useState([]); 
+  
+  // Estado para el administrador (Solo Nombre y Enlace)
+  const [newSponsor, setNewSponsor] = useState({ nombre: '', enlace: '' });
+  const [isEditingSponsor, setIsEditingSponsor] = useState(false);
+  const [editingSponsorId, setEditingSponsorId] = useState(null);
+
+  const allSponsorsFollowed = sponsorsList.length > 0 && followedSponsors.length === sponsorsList.length;
+
+  const handleFollowClick = (id, url) => {
+    window.open(url, '_blank', 'noopener,noreferrer');
+    if (!followedSponsors.includes(id)) {
+      setFollowedSponsors(prev => [...prev, id]);
+    }
+  };
+
   const [user, setUser] = useState(null);
   const [activeTab, setActiveTab] = useState('register'); // 'register', 'admin-list', 'roulette', 'manage-events'
   const [participants, setParticipants] = useState([]);
@@ -239,73 +258,88 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!user) return;
+      if (!user) return;
 
-    // RULE 1: STRICT PATH FOR PUBLIC DATA
-    const eventsCollectionRef = collection(db, 'artifacts', appId, 'public', 'data', 'eventos');
+      // RULE 1: STRICT PATH FOR PUBLIC DATA
+      const eventsCollectionRef = collection(db, 'artifacts', appId, 'public', 'data', 'eventos');
 
-    const unsubscribeEvents = onSnapshot(
-      eventsCollectionRef,
-      async (snapshot) => {
-        let list = [];
-        snapshot.forEach((doc) => {
-          list.push({ id: doc.id, ...doc.data() });
-        });
-
-        if (list.length === 0) {
-          for (const item of DEFAULT_EVENTS) {
-            const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'eventos', item.id);
-            await setDoc(docRef, { 
-              nombre: item.nombre, 
-              descripcion: item.descripcion, 
-              fechaCreado: Date.now(), 
-              activo: true,
-              categoria: item.categoria
-            });
-          }
-        } else {
-          list.sort((a, b) => (b.fechaCreado || 0) - (a.fechaCreado || 0));
-          setEvents(list);
-          if (formData.evento === '' && list.length > 0) {
-            setFormData(prev => ({ ...prev, evento: list[0].nombre }));
-          }
-          if (selectedRouletteEvent === '' && list.length > 0) {
-            setSelectedRouletteEvent(list[0].nombre);
-          }
-        }
-      },
-      (error) => {
-        console.error("Firestore events sync error: ", error);
-      }
-    );
-
-    let unsubscribeParticipants = () => {};
-    if (isAdminAuthenticated) {
-      const participantsCollectionRef = collection(db, 'artifacts', appId, 'public', 'data', 'registrados');
-      unsubscribeParticipants = onSnapshot(
-        participantsCollectionRef,
-        (snapshot) => {
-          const list = [];
+      const unsubscribeEvents = onSnapshot(
+        eventsCollectionRef,
+        async (snapshot) => {
+          let list = [];
           snapshot.forEach((doc) => {
             list.push({ id: doc.id, ...doc.data() });
           });
-          list.sort((a, b) => (b.fechaRegistro || 0) - (a.fechaRegistro || 0));
-          setParticipants(list);
+
+          if (list.length === 0) {
+            for (const item of DEFAULT_EVENTS) {
+              const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'eventos', item.id);
+              await setDoc(docRef, { 
+                nombre: item.nombre, 
+                descripcion: item.descripcion, 
+                fechaCreado: Date.now(), 
+                activo: true,
+                categoria: item.categoria
+              });
+            }
+          } else {
+            list.sort((a, b) => (b.fechaCreado || 0) - (a.fechaCreado || 0));
+            setEvents(list);
+            if (formData.evento === '' && list.length > 0) {
+              setFormData(prev => ({ ...prev, evento: list[0].nombre }));
+            }
+            if (selectedRouletteEvent === '' && list.length > 0) {
+              setSelectedRouletteEvent(list[0].nombre);
+            }
+          }
         },
         (error) => {
-          console.error("Firestore participants sync error: ", error);
-          triggerNotification('error', 'Error al sincronizar participantes.');
+          console.error("Firestore events sync error: ", error);
         }
       );
-    } else {
-      setParticipants([]);
-    }
 
-    return () => {
-      unsubscribeEvents();
-      unsubscribeParticipants();
-    };
-  }, [user, isAdminAuthenticated]);
+      // --- NUEVO: SINCRONIZACIÓN DE PATROCINADORES ---
+      const sponsorsRef = collection(db, 'artifacts', appId, 'public', 'data', 'patrocinadores');
+      const unsubscribeSponsors = onSnapshot(
+        sponsorsRef,
+        (snapshot) => {
+          const list = [];
+          snapshot.forEach((doc) => list.push({ id: doc.id, ...doc.data() }));
+          setSponsorsList(list);
+        },
+        (error) => console.error("Error al sincronizar patrocinadores: ", error)
+      );
+      // -----------------------------------------------
+
+      let unsubscribeParticipants = () => {};
+      if (isAdminAuthenticated) {
+        const participantsCollectionRef = collection(db, 'artifacts', appId, 'public', 'data', 'registrados');
+        unsubscribeParticipants = onSnapshot(
+          participantsCollectionRef,
+          (snapshot) => {
+            const list = [];
+            snapshot.forEach((doc) => {
+              list.push({ id: doc.id, ...doc.data() });
+            });
+            list.sort((a, b) => (b.fechaRegistro || 0) - (a.fechaRegistro || 0));
+            setParticipants(list);
+          },
+          (error) => {
+            console.error("Firestore participants sync error: ", error);
+            triggerNotification('error', 'Error al sincronizar participantes.');
+          }
+        );
+      } else {
+        setParticipants([]);
+      }
+
+      // LIMPIEZA DE MEMORIA AL CERRAR
+      return () => {
+        unsubscribeEvents();
+        unsubscribeParticipants();
+        unsubscribeSponsors(); // Agregamos la limpieza de los patrocinadores aquí
+      };
+    }, [user, isAdminAuthenticated]);
 
   useEffect(() => {
     const activeList = events.filter(ev => ev.activo !== false);
@@ -322,6 +356,10 @@ export default function App() {
   const handleInputChange = (e) => {
     const { name, value, type, checked } = e.target;
     let processedValue = value;
+
+    if (name === 'evento') {
+      setFollowedSponsors([]);
+    }
 
     if (name === 'nombreCompleto' && type !== 'checkbox') {
       processedValue = value.replace(/[^a-zA-ZáéíóúÁÉÍÓÚñÑ\s]/g, '');
@@ -492,6 +530,55 @@ export default function App() {
       triggerNotification('error', 'Error al guardar el evento.');
     }
   };
+
+  // --- LÓGICA DE PATROCINADORES (ADMIN) ---
+  const handleSaveSponsor = async (e) => {
+    e.preventDefault();
+    if (!newSponsor.nombre.trim() || !newSponsor.enlace.trim()) {
+      triggerNotification('error', 'Debes completar el nombre y el enlace.');
+      return;
+    }
+
+    try {
+      if (isEditingSponsor && editingSponsorId) {
+        // Editar existente
+        const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'patrocinadores', editingSponsorId);
+        await setDoc(docRef, { ...newSponsor, actualizadoEn: Date.now() }, { merge: true });
+        triggerNotification('success', 'Patrocinador actualizado.');
+      } else {
+        // Crear nuevo
+        const docId = `sponsor-${Date.now()}`;
+        const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'patrocinadores', docId);
+        await setDoc(docRef, { ...newSponsor, creadoEn: Date.now() });
+        triggerNotification('success', 'Nuevo patrocinador añadido.');
+      }
+      
+      // Limpiar formulario después de guardar
+      setNewSponsor({ nombre: '', enlace: '' });
+      setIsEditingSponsor(false);
+      setEditingSponsorId(null);
+    } catch (error) {
+      console.error("Error guardando patrocinador: ", error);
+      triggerNotification('error', 'Error al guardar el patrocinador.');
+    }
+  };
+
+  const handleDeleteSponsor = async (id) => {
+    try {
+      await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'patrocinadores', id));
+      triggerNotification('success', 'Patrocinador eliminado.');
+    } catch (error) {
+      console.error("Error eliminando patrocinador: ", error);
+      triggerNotification('error', 'No se pudo eliminar el patrocinador.');
+    }
+  };
+
+  const handleEditSponsor = (sponsor) => {
+    setIsEditingSponsor(true);
+    setEditingSponsorId(sponsor.id);
+    setNewSponsor({ nombre: sponsor.nombre, enlace: sponsor.enlace });
+  };
+  // ----------------------------------------
 
   const handleToggleEventActive = async (eventId, currentStatus) => {
     try {
@@ -991,6 +1078,18 @@ export default function App() {
                     <Calendar className="w-4 h-4" />
                     Gestión Eventos
                   </button>
+
+                  <button 
+                    onClick={() => handleAdminTabAccess('sponsors')}
+                    className={`flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold transition-all duration-300 ${
+                      activeTab === 'sponsors' 
+                        ? `bg-gradient-to-r ${activeBrandStyles.gradient} text-slate-950 shadow-lg ${activeBrandStyles.shadowAccent}` 
+                        : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+                    }`}
+                  >
+                    <Award className="w-4 h-4" />
+                    Marcas Aliadas
+                  </button>
                 </>
               )}
             </nav>
@@ -1072,6 +1171,16 @@ export default function App() {
                 >
                   <Calendar className="w-5 h-5" />
                   Gestión de Eventos
+                </button>
+
+                <button
+                  onClick={() => handleAdminTabAccess('sponsors')}
+                  className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-semibold transition ${
+                    activeTab === 'sponsors' ? `bg-gradient-to-r ${activeBrandStyles.gradient} text-slate-950` : 'text-slate-300 hover:bg-slate-800'
+                  }`}
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
+                  Marcas Aliadas
                 </button>
               </>
             )}
@@ -1355,6 +1464,35 @@ export default function App() {
                   </div>
                 </div>
 
+                {/* --- REQUISITO DE PATROCINADORES (PARTE A) --- */}
+                <div className="mt-6 p-4 rounded-xl border border-slate-800 bg-slate-900/50">
+                  <div className="flex items-center justify-between gap-4">
+                    <div>
+                      <h4 className="text-white font-medium text-sm mb-0.5">Apoya a nuestras marcas aliadas</h4>
+                      <p className="text-xs text-slate-400">
+                        Requisito obligatorio para habilitar tu registro ({followedSponsors.length}/{sponsorsList.length})
+                      </p>
+                    </div>
+                    
+                    {allSponsorsFollowed ? (
+                      <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 shrink-0">
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7"></path>
+                        </svg>
+                        <span className="text-xs font-bold uppercase tracking-wider">Listo</span>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setShowSponsorsModal(true)}
+                        className={`px-4 py-2 rounded-lg text-xs font-black uppercase tracking-wider text-white transition-all duration-300 bg-gradient-to-r ${brandStyles[activeBrand].gradient} hover:scale-105 shadow-lg ${brandStyles[activeBrand].shadow} shrink-0`}
+                      >
+                        Ver Marcas
+                      </button>
+                    )}
+                  </div>
+                </div>
+
                 {/* Aceptación de Términos */}
                 <div className="flex items-start gap-3 pt-2">
                   <input 
@@ -1374,11 +1512,16 @@ export default function App() {
                 {/* Botón de Enviar */}
                 <button 
                   type="submit" 
-                  disabled={formStatus.type === 'loading'}
-                  className={`w-full mt-2 bg-gradient-to-r text-slate-950 font-black tracking-wider text-sm py-4 rounded-xl shadow-lg active:scale-[0.99] transition-all duration-300 flex items-center justify-center gap-2 uppercase ${activeBrandStyles.gradient} ${activeBrandStyles.hoverGradient} ${activeBrandStyles.shadowAccent}`}
+                  disabled={formStatus.type === 'loading' || !allSponsorsFollowed}
+                  className={`w-full mt-2 bg-gradient-to-r text-slate-950 font-black tracking-wider text-sm py-4 rounded-xl shadow-lg active:scale-[0.99] transition-all duration-300 flex items-center justify-center gap-2 uppercase disabled:opacity-50 disabled:grayscale disabled:cursor-not-allowed ${activeBrandStyles.gradient} ${activeBrandStyles.hoverGradient} ${activeBrandStyles.shadowAccent}`}
                 >
                   <UserPlus className="w-5 h-5 text-slate-950" />
-                  Confirmar Registro
+                  {formStatus.type === 'loading' 
+                    ? 'Procesando...' 
+                    : allSponsorsFollowed 
+                      ? 'Confirmar Registro' 
+                      : 'Visita los Patrocinadores'
+                  }
                 </button>
               </form>
             </div>
@@ -1876,6 +2019,63 @@ export default function App() {
             </div>
           </div>
         )}
+
+        {/* Tab 5: Gestion de sponsors */}
+        {activeTab === 'sponsors' && isAdminAuthenticated && (
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 mt-6 shadow-2xl animate-fade-in">
+            <h3 className="text-white font-black uppercase tracking-wider mb-6 flex items-center gap-2">
+              <svg className="w-5 h-5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path>
+              </svg>
+              Gestionar Marcas Aliadas
+            </h3>
+            
+            {/* Formulario para añadir/editar */}
+            <form onSubmit={handleSaveSponsor} className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+              <input 
+                type="text" 
+                placeholder="Nombre de la marca" 
+                value={newSponsor.nombre} 
+                onChange={(e) => setNewSponsor({...newSponsor, nombre: e.target.value})}
+                className="bg-slate-950 border border-slate-800 rounded-lg px-4 py-2 text-white placeholder-slate-600 focus:outline-none focus:border-emerald-500" 
+              />
+              <input 
+                type="url" 
+                placeholder="Enlace (ej: https://instagram.com/...)" 
+                value={newSponsor.enlace} 
+                onChange={(e) => setNewSponsor({...newSponsor, enlace: e.target.value})}
+                className="bg-slate-950 border border-slate-800 rounded-lg px-4 py-2 text-white placeholder-slate-600 focus:outline-none focus:border-emerald-500" 
+              />
+              <button 
+                type="submit" 
+                className={`font-bold rounded-lg text-slate-950 hover:opacity-90 transition-all shadow-md ${
+                  isEditingSponsor 
+                    ? 'bg-amber-500' 
+                    : `bg-gradient-to-r ${activeBrandStyles.gradient}`
+                }`}
+              >
+                {isEditingSponsor ? 'Actualizar Marca' : 'Añadir Marca'}
+              </button>
+            </form>
+
+            {/* Lista de Marcas */}
+            <div className="space-y-3">
+              {sponsorsList.map(sponsor => (
+                <div key={sponsor.id} className="bg-slate-950 border border-slate-800 p-4 rounded-xl flex items-center justify-between">
+                  <span className="text-white font-medium">{sponsor.nombre}</span>
+                  <div className="flex gap-3">
+                    <button onClick={() => handleEditSponsor(sponsor)} className="text-amber-400 hover:text-amber-300 text-sm font-semibold">Editar</button>
+                    <button onClick={() => handleDeleteSponsor(sponsor.id)} className="text-rose-500 hover:text-rose-400 text-sm font-semibold">Eliminar</button>
+                  </div>
+                </div>
+              ))}
+              {sponsorsList.length === 0 && (
+                <p className="text-slate-500 text-sm text-center py-4">No hay marcas aliadas registradas.</p>
+              )}
+            </div>
+          </div>
+        )}
+  
       </main>
 
       {/* MODAL 1: Autenticación de Organizador */}
@@ -2020,6 +2220,55 @@ export default function App() {
                 Eliminar Evento
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: Marcas Aliadas */}
+      {showSponsorsModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/90 backdrop-blur-md p-4 animate-fade-in">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full p-6 shadow-2xl relative overflow-hidden">
+            <div className="flex justify-between items-center mb-6">
+              <h3 className="text-xl font-black text-white uppercase tracking-wider">Marcas Aliadas</h3>
+              <button 
+                onClick={() => setShowSponsorsModal(false)}
+                className="text-slate-400 hover:text-white transition"
+              >
+                <X className="w-6 h-6" />
+              </button>
+            </div>
+
+            <p className="text-slate-400 text-sm mb-6">
+              Haz clic en los enlaces de nuestros patrocinadores para desbloquear tu registro:
+            </p>
+
+            <div className="space-y-3">
+              {sponsorsList.map(sponsor => (
+                <button
+                  key={sponsor.id}
+                  onClick={() => handleFollowClick(sponsor.id, sponsor.enlace)}
+                  className={`w-full p-4 rounded-xl border flex items-center justify-between transition-all ${
+                    followedSponsors.includes(sponsor.id)
+                      ? 'bg-emerald-950/20 border-emerald-500/50'
+                      : 'bg-slate-800 border-slate-700 hover:border-slate-500'
+                  }`}
+                >
+                  <span className="font-bold text-white">{sponsor.nombre}</span>
+                  {followedSponsors.includes(sponsor.id) ? (
+                    <CheckCircle className="w-5 h-5 text-emerald-400" />
+                  ) : (
+                    <span className="text-xs font-bold bg-slate-700 px-2 py-1 rounded text-slate-300">VISITAR</span>
+                  )}
+                </button>
+              ))}
+            </div>
+            
+            <button 
+              onClick={() => setShowSponsorsModal(false)}
+              className="w-full mt-6 bg-slate-800 hover:bg-slate-700 text-white font-bold py-3 rounded-xl transition"
+            >
+              Cerrar
+            </button>
           </div>
         </div>
       )}

@@ -1023,32 +1023,28 @@ export default function App() {
       {/* Main Container */}
       <main className="flex-grow max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
         
-        {/* Real-time Indicator Widget */}
-        <div className="mb-6 flex flex-wrap gap-4 justify-between items-center bg-slate-900/40 p-3.5 rounded-xl border border-slate-800/80">
-          <div className="flex items-center gap-2">
-            <span className="relative flex h-3.5 w-3.5">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-3.5 w-3.5 bg-cyan-500"></span>
-            </span>
-            <p className="text-sm font-semibold text-slate-300">
-              Servidor Seguro de Llano Torneo Sport Sincronizado en la Nube
-            </p>
-          </div>
-          <div className="flex gap-2 text-xs font-semibold">
-            <span className="bg-slate-800 px-3 py-1.5 rounded-full text-slate-300">
-              {events.length} Eventos Activos
-            </span>
-            {isAdminAuthenticated ? (
+        {/* Real-time Indicator Widget - Only visible to authenticated admins */}
+        {isAdminAuthenticated && (
+          <div className="mb-6 flex flex-wrap gap-4 justify-between items-center bg-slate-900/40 p-3.5 rounded-xl border border-slate-800/80 animate-fade-in">
+            <div className="flex items-center gap-2">
+              <span className="relative flex h-3.5 w-3.5">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-3.5 w-3.5 bg-cyan-500"></span>
+              </span>
+              <p className="text-sm font-semibold text-slate-300">
+                Servidor Seguro de Llano Torneo Sport Sincronizado en la Nube
+              </p>
+            </div>
+            <div className="flex gap-2 text-xs font-semibold">
+              <span className="bg-slate-800 px-3 py-1.5 rounded-full text-slate-300">
+                {events.length} Eventos Activos
+              </span>
               <span className="bg-cyan-950 text-cyan-400 border border-cyan-900 px-3 py-1.5 rounded-full animate-pulse">
                 {participants.length} Registrados Totales
               </span>
-            ) : (
-              <span className="bg-cyan-950 text-cyan-400 border border-cyan-900 px-3 py-1.5 rounded-full">
-                Registro Habilitado
-              </span>
-            )}
+            </div>
           </div>
-        </div>
+        )}
 
         {/* Tab 1: Registration Form */}
         {activeTab === 'register' && (

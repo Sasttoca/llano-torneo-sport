@@ -937,7 +937,6 @@ export default function App() {
                 <h1 className="text-lg sm:text-xl font-black tracking-tight uppercase text-white transition-colors duration-300">
                   Llano Torneo<span className={`${activeBrandStyles.titleColor} font-extrabold text-md sm:text-lg block sm:inline sm:ml-1 transition-colors duration-300`}>{activeBrandStyles.title}</span>
                 </h1>
-                <span className="text-[10px] tracking-widest text-slate-400 uppercase font-semibold block">Sincronización Multi-Marca</span>
               </div>
             </div>
 

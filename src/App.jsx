@@ -40,7 +40,9 @@ import {
   PlusCircle,
   Pencil,
   Eye,
-  EyeOff
+  EyeOff,
+  Sparkles,
+  Gamepad2
 } from 'lucide-react';
 
 const firebaseConfig = typeof __firebase_config !== 'undefined' 
@@ -59,14 +61,15 @@ const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 
-// default events to fall back on or seed when database is empty
+// Eventos predeterminados con balance de categorías para la base de datos inicial
 const DEFAULT_EVENTS = [
-  { id: 'default-1', nombre: 'Sorteo de Bienvenida Llano Torneo Sport 2026', descripcion: 'Sorteo general para todos los nuevos participantes.', activo: true },
-  { id: 'default-2', nombre: 'Gran Sorteo Integración Deportiva', descripcion: 'Sorteo especial del torneo de integración.', activo: true },
-  { id: 'default-3', nombre: 'Rifa de Clausura de Torneos', descripcion: 'Evento de cierre con increíbles premios.', activo: true }
+  { id: 'default-1', nombre: 'Sorteo de Bienvenida Llano Torneo Sport 2026', descripcion: 'Sorteo general para todos los nuevos participantes deportivos.', activo: true, categoria: 'sport' },
+  { id: 'default-2', nombre: 'Gran Sorteo Integración Deportiva', descripcion: 'Sorteo especial del torneo de integración de fútbol.', activo: true, categoria: 'sport' },
+  { id: 'default-3', nombre: 'Gran Campeonato EA Sports FC 26 - Llano Gaming', descripcion: 'Torneo virtual de fútbol para la consola de nueva generación.', activo: true, categoria: 'gaming' },
+  { id: 'default-4', nombre: 'Rifa de Clausura de Torneos Gaming', descripcion: 'Evento de cierre con increíbles premios para apasionados del gaming.', activo: true, categoria: 'gaming' }
 ];
 
-// Helper to escape HTML characters inside Export to Excel safely
+// Helper para sanitizar strings en el Excel corporativo
 const escapeHTML = (str) => {
   if (!str) return '';
   return str.replace(/[&<>'"]/g, 
@@ -78,6 +81,52 @@ const escapeHTML = (str) => {
       '"': '&quot;'
     }[tag] || tag)
   );
+};
+
+// Diccionario estático de estilos para la doble marca
+const brandStyles = {
+  sport: {
+    textAccent: 'text-cyan-400',
+    textAccentHover: 'hover:text-cyan-300',
+    borderAccent: 'border-cyan-400',
+    borderAccentHover: 'hover:border-cyan-300',
+    focusBorderAccent: 'focus:border-cyan-400',
+    focusRingAccent: 'focus:ring-cyan-500',
+    bgAccent: 'bg-cyan-500',
+    bgAccentLight: 'bg-cyan-950/40',
+    borderAccentLight: 'border-cyan-900/40',
+    gradient: 'from-cyan-400 to-sky-500',
+    hoverGradient: 'hover:from-cyan-300 hover:to-sky-400',
+    shadowAccent: 'shadow-cyan-400/20',
+    logo: 'image_fb3306.jpg', // Logo de llanero con trofeo
+    title: 'Sport',
+    titleColor: 'text-cyan-400',
+    glowBg: 'bg-cyan-500/10',
+    textAccentLight: 'text-cyan-400',
+    ringColor: 'focus:ring-cyan-500',
+    bulletAccent: 'text-cyan-400'
+  },
+  gaming: {
+    textAccent: 'text-red-500',
+    textAccentHover: 'hover:text-red-400',
+    borderAccent: 'border-red-500',
+    borderAccentHover: 'hover:border-red-400',
+    focusBorderAccent: 'focus:border-red-500',
+    focusRingAccent: 'focus:ring-red-500',
+    bgAccent: 'bg-red-500',
+    bgAccentLight: 'bg-red-950/40',
+    borderAccentLight: 'border-red-900/40',
+    gradient: 'from-red-500 to-rose-600',
+    hoverGradient: 'hover:from-red-400 hover:to-rose-500',
+    shadowAccent: 'shadow-red-500/20',
+    logo: 'image_fb3325.jpg', // Logo urbano de control gaming
+    title: 'Gaming',
+    titleColor: 'text-red-500',
+    glowBg: 'bg-red-500/10',
+    textAccentLight: 'text-red-400',
+    ringColor: 'focus:ring-red-500',
+    bulletAccent: 'text-red-500'
+  }
 };
 
 export default function App() {
@@ -95,12 +144,12 @@ export default function App() {
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
-  // New Event Form State
-  const [newEvent, setNewEvent] = useState({ nombre: '', descripcion: '' });
+  // Formulario de Eventos
+  const [newEvent, setNewEvent] = useState({ nombre: '', descripcion: '', categoria: 'sport' });
   const [isEditingEvent, setIsEditingEvent] = useState(false);
   const [editingEventId, setEditingEventId] = useState(null);
 
-  // Participant Form State
+  // Formulario de Participantes
   const [formData, setFormData] = useState({
     nombreCompleto: '',
     documento: '',
@@ -108,19 +157,36 @@ export default function App() {
     ciudadResidencia: '',
     celular: '',
     correo: '',
-    evento: '', // stores name of the selected event
+    evento: '', // Almacena el nombre del evento seleccionado
     terminos: false
   });
   const [formStatus, setFormStatus] = useState({ type: '', message: '' });
 
-  // Custom Modal and Notification States
+  // Estados de modals y notificaciones
   const [notification, setNotification] = useState(null);
   const [deleteTargetId, setDeleteTargetId] = useState(null);
   const [deleteTargetName, setDeleteTargetName] = useState('');
-  const [deleteEventTarget, setDeleteEventTarget] = useState(null); // Stores { id, nombre } for active event delete confirmation
+  const [deleteEventTarget, setDeleteEventTarget] = useState(null); 
   const [showWinnerModal, setShowWinnerModal] = useState(false);
   const [winnerName, setWinnerName] = useState('');
-  const [winnerDoc, setWinnerDoc] = useState(''); // Stores winner identification to display safely
+  const [winnerDoc, setWinnerDoc] = useState(''); 
+
+  // Determinar la marca correspondiente de un evento dado su nombre
+  const getEventBrand = (eventName) => {
+    const ev = events.find(e => e.nombre === eventName);
+    return ev?.categoria === 'gaming' ? 'gaming' : 'sport';
+  };
+
+  // Calcular la marca activa según la pestaña y la selección actual para vestir la UI
+  let activeBrand = 'sport';
+  if (activeTab === 'register') {
+    activeBrand = getEventBrand(formData.evento);
+  } else if (activeTab === 'roulette') {
+    activeBrand = getEventBrand(selectedRouletteEvent);
+  } else if (activeTab === 'admin-list') {
+    activeBrand = selectedAdminEvent === 'all' ? 'sport' : getEventBrand(selectedAdminEvent);
+  }
+  const activeBrandStyles = brandStyles[activeBrand];
 
   const playBeep = (freq, duration) => {
     if (!soundEnabled) return;
@@ -137,7 +203,7 @@ export default function App() {
       oscillator.start();
       oscillator.stop(audioCtx.currentTime + duration);
     } catch (e) {
-      console.log("Audio simulation blocked or unsupported.");
+      console.log("Audio simulation blocked.");
     }
   };
 
@@ -145,7 +211,7 @@ export default function App() {
     if (!soundEnabled) return;
     let count = 0;
     const interval = setInterval(() => {
-      playBeep(500 + count * 80, 0.15);
+      playBeep(520 + count * 100, 0.15);
       count++;
       if (count > 6) clearInterval(interval);
     }, 100);
@@ -178,7 +244,6 @@ export default function App() {
     // RULE 1: STRICT PATH FOR PUBLIC DATA
     const eventsCollectionRef = collection(db, 'artifacts', appId, 'public', 'data', 'eventos');
 
-    // Sync Events
     const unsubscribeEvents = onSnapshot(
       eventsCollectionRef,
       async (snapshot) => {
@@ -187,16 +252,20 @@ export default function App() {
           list.push({ id: doc.id, ...doc.data() });
         });
 
-        // If no events exist in database, seed defaults so user has options immediately
         if (list.length === 0) {
           for (const item of DEFAULT_EVENTS) {
             const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'eventos', item.id);
-            await setDoc(docRef, { nombre: item.nombre, descripcion: item.descripcion, fechaCreado: Date.now(), activo: true });
+            await setDoc(docRef, { 
+              nombre: item.nombre, 
+              descripcion: item.descripcion, 
+              fechaCreado: Date.now(), 
+              activo: true,
+              categoria: item.categoria
+            });
           }
         } else {
           list.sort((a, b) => (b.fechaCreado || 0) - (a.fechaCreado || 0));
           setEvents(list);
-          // Set initial values for selectors
           if (formData.evento === '' && list.length > 0) {
             setFormData(prev => ({ ...prev, evento: list[0].nombre }));
           }
@@ -210,7 +279,6 @@ export default function App() {
       }
     );
 
-    // SECURITY OPTIMIZATION: Sync Participants ONLY if user is Authenticated Admin
     let unsubscribeParticipants = () => {};
     if (isAdminAuthenticated) {
       const participantsCollectionRef = collection(db, 'artifacts', appId, 'public', 'data', 'registrados');
@@ -221,7 +289,6 @@ export default function App() {
           snapshot.forEach((doc) => {
             list.push({ id: doc.id, ...doc.data() });
           });
-          // Sort inside JavaScript memory
           list.sort((a, b) => (b.fechaRegistro || 0) - (a.fechaRegistro || 0));
           setParticipants(list);
         },
@@ -231,7 +298,6 @@ export default function App() {
         }
       );
     } else {
-      // Clear data state for normal users to protect memory and privacy
       setParticipants([]);
     }
 
@@ -241,7 +307,6 @@ export default function App() {
     };
   }, [user, isAdminAuthenticated]);
 
-  // Automatically ensure the selected event in registration form is an active event
   useEffect(() => {
     const activeList = events.filter(ev => ev.activo !== false);
     if (activeList.length > 0) {
@@ -301,7 +366,7 @@ export default function App() {
     }
 
     if (!formData.edad || formData.edad.trim() === '') {
-      setFormStatus({ type: 'error', message: 'La edad es un campo obligatorio.' });
+      setFormStatus({ type: 'error', message: 'La edad es obligatoria.' });
       return;
     }
 
@@ -311,15 +376,15 @@ export default function App() {
     }
 
     if (formData.celular.length !== 10) {
-      setFormStatus({ type: 'error', message: 'El número de celular debe tener exactamente 10 dígitos numéricos.' });
+      setFormStatus({ type: 'error', message: 'El número de celular debe tener exactamente 10 dígitos.' });
       return;
     }
 
-    setFormStatus({ type: 'loading', message: 'Verificando y guardando registro de forma segura...' });
+    setFormStatus({ type: 'loading', message: 'Guardando registro de forma segura en la nube...' });
 
     try {
       if (!user) {
-        throw new Error("Conexión perdida. Reintentando...");
+        throw new Error("Conexión perdida con el servidor.");
       }
 
       const targetEvent = events.find(ev => ev.nombre === formData.evento);
@@ -331,12 +396,12 @@ export default function App() {
       const registradosDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'registrados', docId);
       const globalDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'registrados_globales', formData.documento.trim());
 
-      // SECURE PERFORMANCE OPTIMIZATION: Check for duplicate directly on Firestore by document reference (Only 1 read!)
+      // OPTIMIZACIÓN DE CONSUMO: Consulta de 1 lectura para validar duplicado
       const docSnap = await getDoc(registradosDocRef);
       if (docSnap.exists()) {
         setFormStatus({ 
           type: 'error', 
-          message: `El participante con documento "${formData.documento}" ya está registrado en el evento "${formData.evento}". No se permiten duplicados.` 
+          message: `La identificación "${formData.documento}" ya está registrada en el evento "${formData.evento}".` 
         });
         playBeep(220, 0.4);
         return;
@@ -366,7 +431,7 @@ export default function App() {
       });
       
       playBeep(880, 0.3);
-      setFormStatus({ type: 'success', message: `¡Inscripción exitosa al evento "${formData.evento}"! Datos guardados de forma permanente.` });
+      setFormStatus({ type: 'success', message: `¡Inscripción exitosa a "${formData.evento}"! Datos guardados en la nube.` });
       
       setFormData(prev => ({
         ...prev,
@@ -382,7 +447,7 @@ export default function App() {
       setTimeout(() => setFormStatus({ type: '', message: '' }), 5000);
     } catch (error) {
       console.error("Error writing document: ", error);
-      setFormStatus({ type: 'error', message: 'Error de red o de permisos. Intenta enviar nuevamente.' });
+      setFormStatus({ type: 'error', message: 'Error de red o de permisos. Intenta nuevamente.' });
     }
   };
 
@@ -396,6 +461,7 @@ export default function App() {
         await setDoc(docRef, {
           nombre: newEvent.nombre.trim(),
           descripcion: newEvent.descripcion.trim() || 'Sin descripción',
+          categoria: newEvent.categoria,
           fechaCreado: Date.now()
         }, { merge: true });
         
@@ -415,12 +481,13 @@ export default function App() {
           nombre: newEvent.nombre.trim(),
           descripcion: newEvent.descripcion.trim() || 'Sin descripción',
           fechaCreado: Date.now(),
-          activo: true 
+          activo: true,
+          categoria: newEvent.categoria
         });
         playBeep(660, 0.2);
         triggerNotification('success', 'Nuevo evento creado correctamente.');
       }
-      setNewEvent({ nombre: '', descripcion: '' });
+      setNewEvent({ nombre: '', descripcion: '', categoria: 'sport' });
     } catch (error) {
       triggerNotification('error', 'Error al guardar el evento.');
     }
@@ -432,7 +499,7 @@ export default function App() {
       const newStatus = currentStatus === undefined ? false : !currentStatus;
       await setDoc(docRef, { activo: newStatus }, { merge: true });
       playBeep(600, 0.15);
-      triggerNotification('success', `Evento ${newStatus ? 'activado' : 'desactivado'} para nuevos registros.`);
+      triggerNotification('success', `Evento ${newStatus ? 'activado' : 'desactivado'} para registros.`);
     } catch (error) {
       triggerNotification('error', 'Error al cambiar el estado del evento.');
     }
@@ -441,14 +508,14 @@ export default function App() {
   const handleStartEditEvent = (ev) => {
     setIsEditingEvent(true);
     setEditingEventId(ev.id);
-    setNewEvent({ nombre: ev.nombre, descripcion: ev.descripcion });
+    setNewEvent({ nombre: ev.nombre, descripcion: ev.descripcion, categoria: ev.categoria || 'sport' });
     playBeep(600, 0.15);
   };
 
   const handleCancelEditEvent = () => {
     setIsEditingEvent(false);
     setEditingEventId(null);
-    setNewEvent({ nombre: '', descripcion: '' });
+    setNewEvent({ nombre: '', descripcion: '', categoria: 'sport' });
     playBeep(440, 0.1);
   };
 
@@ -535,7 +602,7 @@ export default function App() {
       return;
     }
 
-    const headers = ['Nombre Completo', 'Documento', 'Edad', 'Ciudad Residencia', 'Celular', 'Correo', 'Evento Registrado', 'Fecha Registro'];
+    const headers = ['Nombre Completo', 'Documento', 'Edad', 'Ciudad Residencia', 'Celular', 'Correo', 'Evento Registrado', 'Categoría', 'Fecha Registro'];
     const rows = filteredList.map(p => [
       p.nombreCompleto,
       p.documento,
@@ -544,6 +611,7 @@ export default function App() {
       p.celular,
       p.correo,
       p.evento,
+      getEventBrand(p.evento) === 'sport' ? 'Sport (Deportivo)' : 'Gaming (E-Sports)',
       new Date(p.fechaRegistro).toLocaleString()
     ]);
 
@@ -577,18 +645,26 @@ export default function App() {
 
     const sheetName = (selectedAdminEvent === 'all' ? 'Inscritos' : selectedAdminEvent).substring(0, 30);
     
-    const rowsHTML = filteredList.map(p => `
-      <tr>
-        <td style="padding: 10px; border: 1px solid #334155; color: #f8fafc; background-color: #0f172a; font-family: sans-serif; font-size: 11pt;">${escapeHTML(p.nombreCompleto)}</td>
-        <td style="padding: 10px; border: 1px solid #334155; color: #38bdf8; background-color: #0f172a; font-family: monospace; font-size: 11pt; mso-number-format:'\\@';">${escapeHTML(p.documento)}</td>
-        <td style="padding: 10px; border: 1px solid #334155; color: #f8fafc; background-color: #0f172a; font-family: monospace; font-size: 11pt;">${escapeHTML(p.edad || 'N/A')}</td>
-        <td style="padding: 10px; border: 1px solid #334155; color: #f8fafc; background-color: #0f172a; font-family: sans-serif; font-size: 11pt;">${escapeHTML(p.ciudadResidencia || 'N/A')}</td>
-        <td style="padding: 10px; border: 1px solid #334155; color: #f8fafc; background-color: #0f172a; font-family: monospace; font-size: 11pt; mso-number-format:'\\@';">${escapeHTML(p.celular)}</td>
-        <td style="padding: 10px; border: 1px solid #334155; color: #f8fafc; background-color: #0f172a; font-family: sans-serif; font-size: 11pt;">${escapeHTML(p.correo)}</td>
-        <td style="padding: 10px; border: 1px solid #334155; color: #00e5ff; background-color: #0f172a; font-family: sans-serif; font-size: 11pt; font-weight: bold;">${escapeHTML(p.evento)}</td>
-        <td style="padding: 10px; border: 1px solid #334155; color: #94a3b8; background-color: #0f172a; font-family: monospace; font-size: 10pt;">${escapeHTML(new Date(p.fechaRegistro).toLocaleString())}</td>
-      </tr>
-    `).join('');
+    const rowsHTML = filteredList.map(p => {
+      const brand = getEventBrand(p.evento);
+      const isSport = brand === 'sport';
+      const categoryLabel = isSport ? 'Sport (Deportivo)' : 'Gaming (E-Sports)';
+      const categoryColor = isSport ? '#00e5ff' : '#ff0000';
+
+      return `
+        <tr>
+          <td style="padding: 10px; border: 1px solid #334155; color: #f8fafc; background-color: #0f172a; font-family: sans-serif; font-size: 11pt;">${escapeHTML(p.nombreCompleto)}</td>
+          <td style="padding: 10px; border: 1px solid #334155; color: #38bdf8; background-color: #0f172a; font-family: monospace; font-size: 11pt; mso-number-format:'\\@';">${escapeHTML(p.documento)}</td>
+          <td style="padding: 10px; border: 1px solid #334155; color: #f8fafc; background-color: #0f172a; font-family: monospace; font-size: 11pt;">${escapeHTML(p.edad || 'N/A')}</td>
+          <td style="padding: 10px; border: 1px solid #334155; color: #f8fafc; background-color: #0f172a; font-family: sans-serif; font-size: 11pt;">${escapeHTML(p.ciudadResidencia || 'N/A')}</td>
+          <td style="padding: 10px; border: 1px solid #334155; color: #f8fafc; background-color: #0f172a; font-family: monospace; font-size: 11pt; mso-number-format:'\\@';">${escapeHTML(p.celular)}</td>
+          <td style="padding: 10px; border: 1px solid #334155; color: #f8fafc; background-color: #0f172a; font-family: sans-serif; font-size: 11pt;">${escapeHTML(p.correo)}</td>
+          <td style="padding: 10px; border: 1px solid #334155; color: ${categoryColor}; background-color: #0f172a; font-family: sans-serif; font-size: 11pt; font-weight: bold;">${escapeHTML(categoryLabel)}</td>
+          <td style="padding: 10px; border: 1px solid #334155; color: #00e5ff; background-color: #0f172a; font-family: sans-serif; font-size: 11pt; font-weight: bold;">${escapeHTML(p.evento)}</td>
+          <td style="padding: 10px; border: 1px solid #334155; color: #94a3b8; background-color: #0f172a; font-family: monospace; font-size: 10pt;">${escapeHTML(new Date(p.fechaRegistro).toLocaleString())}</td>
+        </tr>
+      `;
+    }).join('');
 
     const excelTemplate = `
       <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
@@ -604,27 +680,28 @@ export default function App() {
       <body style="background-color: #020617; font-family: sans-serif;">
         <table>
           <tr>
-            <th colspan="8" style="text-align: center; font-size: 18pt; font-weight: bold; background-color: #0f172a; color: #00e5ff; border: 1px solid #334155; height: 50px; padding: 15px;">
-              LLANO TORNEO SPORT - LISTA OFICIAL DE REGISTRADOS
+            <th colspan="9" style="text-align: center; font-size: 18pt; font-weight: bold; background-color: #0f172a; color: #00e5ff; border: 1px solid #334155; height: 50px; padding: 15px;">
+              LLANO TORNEO MULTI-PLATAFORMA (SPORT & GAMING) - LISTA OFICIAL
             </th>
           </tr>
           <tr>
-            <th colspan="8" style="text-align: center; font-size: 10pt; font-weight: bold; background-color: #0f172a; color: #94a3b8; border: 1px solid #334155; padding: 5px;">
+            <th colspan="9" style="text-align: center; font-size: 10pt; font-weight: bold; background-color: #0f172a; color: #94a3b8; border: 1px solid #334155; padding: 5px;">
               Filtro: ${selectedAdminEvent === 'all' ? 'Todos los Eventos' : selectedAdminEvent} | Descargado: ${new Date().toLocaleString()}
             </th>
           </tr>
           <tr style="height: 15px;">
-            <td colspan="8" style="background-color: #020617; border: none;"></td>
+            <td colspan="9" style="background-color: #020617; border: none;"></td>
           </tr>
           <tr style="height: 35px;">
             <th style="background-color: #1e293b; color: #00e5ff; border: 1px solid #334155; font-family: sans-serif; font-size: 11pt; font-weight: bold; padding: 10px;">Nombre Completo</th>
-            <th style="background-color: #1e293b; color: #00e5ff; border: 1px solid #334155; font-family: sans-serif; font-size: 11pt; font-weight: bold; padding: 10px;">Documento de Identidad</th>
+            <th style="background-color: #1e293b; color: #00e5ff; border: 1px solid #334155; font-family: sans-serif; font-size: 11pt; font-weight: bold; padding: 10px;">Documento</th>
             <th style="background-color: #1e293b; color: #00e5ff; border: 1px solid #334155; font-family: sans-serif; font-size: 11pt; font-weight: bold; padding: 10px;">Edad</th>
-            <th style="background-color: #1e293b; color: #00e5ff; border: 1px solid #334155; font-family: sans-serif; font-size: 11pt; font-weight: bold; padding: 10px;">Ciudad de Residencia</th>
+            <th style="background-color: #1e293b; color: #00e5ff; border: 1px solid #334155; font-family: sans-serif; font-size: 11pt; font-weight: bold; padding: 10px;">Ciudad Residencia</th>
             <th style="background-color: #1e293b; color: #00e5ff; border: 1px solid #334155; font-family: sans-serif; font-size: 11pt; font-weight: bold; padding: 10px;">Celular</th>
-            <th style="background-color: #1e293b; color: #00e5ff; border: 1px solid #334155; font-family: sans-serif; font-size: 11pt; font-weight: bold; padding: 10px;">Correo Electrónico</th>
+            <th style="background-color: #1e293b; color: #00e5ff; border: 1px solid #334155; font-family: sans-serif; font-size: 11pt; font-weight: bold; padding: 10px;">Correo</th>
+            <th style="background-color: #1e293b; color: #00e5ff; border: 1px solid #334155; font-family: sans-serif; font-size: 11pt; font-weight: bold; padding: 10px;">Categoría</th>
             <th style="background-color: #1e293b; color: #00e5ff; border: 1px solid #334155; font-family: sans-serif; font-size: 11pt; font-weight: bold; padding: 10px;">Evento Asociado</th>
-            <th style="background-color: #1e293b; color: #00e5ff; border: 1px solid #334155; font-family: sans-serif; font-size: 11pt; font-weight: bold; padding: 10px;">Fecha de Registro</th>
+            <th style="background-color: #1e293b; color: #00e5ff; border: 1px solid #334155; font-family: sans-serif; font-size: 11pt; font-weight: bold; padding: 10px;">Fecha Registro</th>
           </tr>
           ${rowsHTML}
         </table>
@@ -653,7 +730,6 @@ export default function App() {
   const [spinTime, setSpinTime] = useState(0);
   const [spinTimeTotal, setSpinTimeTotal] = useState(0);
 
-  const colors = ['#00e5ff', '#0f172a', '#38bdf8', '#1e293b', '#0284c7', '#0f172a'];
   const roulettePool = participants.filter(p => p.evento === selectedRouletteEvent);
 
   const drawRouletteWheel = () => {
@@ -689,18 +765,28 @@ export default function App() {
     const len = roulettePool.length;
     const arc = Math.PI / (len / 2);
 
-    ctx.strokeStyle = '#00e5ff';
+    const rouletteEventObj = events.find(ev => ev.nombre === selectedRouletteEvent);
+    const rouletteBrand = rouletteEventObj?.categoria === 'gaming' ? 'gaming' : 'sport';
+    const activeBrandColorRaw = brandStyles[rouletteBrand].primaryRaw;
+
+    // Configuración dinámica de luces de neón en la ruleta
+    ctx.strokeStyle = activeBrandColorRaw;
     ctx.lineWidth = 6;
     ctx.shadowBlur = 15;
-    ctx.shadowColor = '#00e5ff';
+    ctx.shadowColor = activeBrandColorRaw;
     ctx.beginPath();
     ctx.arc(centerX, centerY, radius + 5, 0, 2 * Math.PI);
     ctx.stroke();
     ctx.shadowBlur = 0; 
 
+    // Paleta cromática adaptativa según el tipo de marca
+    const activeWheelColors = rouletteBrand === 'gaming'
+      ? ['#ff0000', '#0f172a', '#f43f5e', '#1e293b', '#be123c', '#0f172a']
+      : ['#00e5ff', '#0f172a', '#38bdf8', '#1e293b', '#0284c7', '#0f172a'];
+
     for (let i = 0; i < len; i++) {
       const angle = startAngle + i * arc;
-      ctx.fillStyle = colors[i % colors.length];
+      ctx.fillStyle = activeWheelColors[i % activeWheelColors.length];
 
       ctx.beginPath();
       ctx.moveTo(centerX, centerY);
@@ -708,14 +794,17 @@ export default function App() {
       ctx.lineTo(centerX, centerY);
       ctx.fill();
 
-      ctx.strokeStyle = 'rgba(0, 229, 255, 0.2)';
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
       ctx.lineWidth = 1;
       ctx.stroke();
 
       ctx.save();
-      ctx.fillStyle = colors[i % colors.length] === '#00e5ff' || colors[i % colors.length] === '#38bdf8' ? '#020617' : '#ffffff';
       
-      if (ctx.fillStyle === '#ffffff') {
+      const sliceColor = activeWheelColors[i % activeWheelColors.length];
+      const needsDarkText = sliceColor === '#00e5ff' || sliceColor === '#38bdf8' || sliceColor === '#ff0000' || sliceColor === '#f43f5e';
+      ctx.fillStyle = needsDarkText ? '#020617' : '#ffffff';
+      
+      if (!needsDarkText) {
         ctx.shadowColor = 'rgba(0, 0, 0, 0.8)';
         ctx.shadowBlur = 4;
       }
@@ -731,21 +820,22 @@ export default function App() {
       ctx.restore();
     }
 
+    // Botón central adaptativo
     ctx.fillStyle = '#0f172a';
-    ctx.strokeStyle = '#00e5ff';
+    ctx.strokeStyle = activeBrandColorRaw;
     ctx.lineWidth = 4;
     ctx.shadowBlur = 10;
-    ctx.shadowColor = '#00e5ff';
+    ctx.shadowColor = activeBrandColorRaw;
     ctx.beginPath();
     ctx.arc(centerX, centerY, 30, 0, 2 * Math.PI);
     ctx.fill();
     ctx.stroke();
     ctx.shadowBlur = 0;
 
-    ctx.fillStyle = '#00e5ff';
+    ctx.fillStyle = activeBrandColorRaw;
     ctx.font = 'bold 18px Arial';
     ctx.textAlign = 'center';
-    ctx.fillText('🏆', centerX, centerY + 6);
+    ctx.fillText(rouletteBrand === 'gaming' ? '🎮' : '⚽', centerX, centerY + 6);
   };
 
   useEffect(() => {
@@ -821,31 +911,33 @@ export default function App() {
     playConfettiBeeps();
   };
 
+  const handleImageError = (e) => {
+    e.target.style.display = 'none';
+  };
+
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-cyan-500 selection:text-slate-950">
+    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans transition-all duration-500 selection:bg-slate-100 selection:text-slate-950">
       
-      {/* Header */}
-      <header className="sticky top-0 z-40 bg-slate-900/90 backdrop-blur-md border-b border-slate-800">
+      {/* Header adaptable */}
+      <header className="sticky top-0 z-40 bg-slate-900/95 backdrop-blur-md border-b border-slate-800 transition-colors duration-300">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-20">
-            {/* Logo Area */}
+            {/* Cabecera / Marca Adaptable */}
             <div className="flex items-center gap-3">
               <div className="relative group">
-                <div className="absolute -inset-1 bg-cyan-400 rounded-full blur opacity-25 group-hover:opacity-75 transition duration-500"></div>
+                <div className={`absolute -inset-1 rounded-full blur opacity-25 group-hover:opacity-75 transition duration-500 ${activeBrand === 'sport' ? 'bg-cyan-400' : 'bg-red-500'}`}></div>
                 <img 
-                  src="image_a10aed.png" 
-                  alt="Llano Torneo Sport Logo" 
-                  className="relative h-14 w-14 rounded-full object-cover border-2 border-cyan-400 shadow-md"
-                  onError={(e) => {
-                    e.target.style.display = 'none';
-                  }}
+                  src={activeBrandStyles.logo} 
+                  alt={`Llano Torneo ${activeBrandStyles.title} Logo`} 
+                  className={`relative h-14 w-14 rounded-full object-cover border-2 shadow-md transition-all duration-300 ${activeBrand === 'sport' ? 'border-cyan-400' : 'border-red-500'}`}
+                  onError={handleImageError}
                 />
               </div>
               <div>
-                <h1 className="text-xl font-black tracking-tight uppercase text-white">
-                  Llano Torneo<span className="text-cyan-400 font-extrabold text-lg block sm:inline sm:ml-1">Sport</span>
+                <h1 className="text-lg sm:text-xl font-black tracking-tight uppercase text-white transition-colors duration-300">
+                  Llano Torneo<span className={`${activeBrandStyles.titleColor} font-extrabold text-md sm:text-lg block sm:inline sm:ml-1 transition-colors duration-300`}>{activeBrandStyles.title}</span>
                 </h1>
-                <span className="text-[10px] tracking-widest text-slate-400 uppercase font-semibold block">Inscripciones y Sorteos</span>
+                <span className="text-[10px] tracking-widest text-slate-400 uppercase font-semibold block">Sincronización Multi-Marca</span>
               </div>
             </div>
 
@@ -855,7 +947,7 @@ export default function App() {
                 onClick={() => setActiveTab('register')}
                 className={`flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold transition-all duration-300 ${
                   activeTab === 'register' 
-                    ? 'bg-gradient-to-r from-cyan-500 to-sky-600 text-slate-950 shadow-lg shadow-cyan-500/20' 
+                    ? `bg-gradient-to-r ${activeBrandStyles.gradient} text-slate-950 shadow-lg ${activeBrandStyles.shadowAccent}` 
                     : 'text-slate-300 hover:bg-slate-800 hover:text-white'
                 }`}
               >
@@ -869,7 +961,7 @@ export default function App() {
                     onClick={() => handleAdminTabAccess('admin-list')}
                     className={`flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold transition-all duration-300 ${
                       activeTab === 'admin-list' 
-                        ? 'bg-gradient-to-r from-cyan-500 to-sky-600 text-slate-950 shadow-lg shadow-cyan-500/20' 
+                        ? `bg-gradient-to-r ${activeBrandStyles.gradient} text-slate-950 shadow-lg ${activeBrandStyles.shadowAccent}` 
                         : 'text-slate-300 hover:bg-slate-800 hover:text-white'
                     }`}
                   >
@@ -881,7 +973,7 @@ export default function App() {
                     onClick={() => handleAdminTabAccess('roulette')}
                     className={`flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold transition-all duration-300 ${
                       activeTab === 'roulette' 
-                        ? 'bg-gradient-to-r from-cyan-500 to-sky-600 text-slate-950 shadow-lg shadow-cyan-500/20' 
+                        ? `bg-gradient-to-r ${activeBrandStyles.gradient} text-slate-950 shadow-lg ${activeBrandStyles.shadowAccent}` 
                         : 'text-slate-300 hover:bg-slate-800 hover:text-white'
                     }`}
                   >
@@ -893,7 +985,7 @@ export default function App() {
                     onClick={() => handleAdminTabAccess('manage-events')}
                     className={`flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold transition-all duration-300 ${
                       activeTab === 'manage-events' 
-                        ? 'bg-gradient-to-r from-cyan-500 to-sky-600 text-slate-950 shadow-lg shadow-cyan-500/20' 
+                        ? `bg-gradient-to-r ${activeBrandStyles.gradient} text-slate-950 shadow-lg ${activeBrandStyles.shadowAccent}` 
                         : 'text-slate-300 hover:bg-slate-800 hover:text-white'
                     }`}
                   >
@@ -904,32 +996,32 @@ export default function App() {
               )}
             </nav>
 
-            {/* Sound Toggle & Admin Login button */}
+            {/* Opciones Especiales */}
             <div className="flex items-center gap-3">
               <button 
                 onClick={() => setSoundEnabled(!soundEnabled)}
-                className="p-2 rounded-lg bg-slate-800 text-slate-300 hover:text-cyan-400 transition"
+                className={`p-2 rounded-lg bg-slate-800 text-slate-300 transition-colors ${activeBrand === 'sport' ? 'hover:text-cyan-400' : 'hover:text-red-500'}`}
                 title={soundEnabled ? "Silenciar" : "Activar Sonido"}
               >
                 {soundEnabled ? <Volume2 className="w-5 h-5" /> : <VolumeX className="w-5 h-5" />}
               </button>
 
               {isAdminAuthenticated ? (
-                <div className="hidden sm:flex items-center gap-1 bg-cyan-950/40 border border-cyan-800/60 px-3 py-1.5 rounded-full text-xs text-cyan-400 font-bold">
-                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                <div className={`hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold border transition-colors ${activeBrand === 'sport' ? 'bg-cyan-950/40 border-cyan-800/60 text-cyan-400' : 'bg-red-950/40 border-red-800/60 text-red-500'}`}>
+                  <span className={`w-2 h-2 rounded-full animate-pulse ${activeBrand === 'sport' ? 'bg-cyan-400' : 'bg-red-500'}`}></span>
                   Admin Activado
                 </div>
               ) : (
                 <button 
                   onClick={() => setShowPinModal(true)}
-                  className="hidden sm:flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-xs px-3 py-1.5 rounded-lg transition text-slate-300 hover:text-white"
+                  className={`hidden sm:flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-xs px-3 py-1.5 rounded-lg transition text-slate-300 hover:text-white`}
                 >
-                  <Lock className="w-3.5 h-3.5 text-cyan-400" />
+                  <Lock className={`w-3.5 h-3.5 ${activeBrandStyles.textAccent}`} />
                   Acceso Admin
                 </button>
               )}
 
-              {/* Mobile Menu Icon */}
+              {/* Menú Móvil */}
               <button 
                 onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
                 className="md:hidden p-2 rounded-lg bg-slate-800 text-slate-300 hover:text-white transition"
@@ -940,13 +1032,13 @@ export default function App() {
           </div>
         </div>
 
-        {/* Mobile Navigation Drawer */}
+        {/* Drawer de Navegación Móvil */}
         {mobileMenuOpen && (
           <div className="md:hidden px-4 pt-2 pb-4 bg-slate-900 border-b border-slate-800 space-y-2 animate-fade-in">
             <button 
               onClick={() => { setActiveTab('register'); setMobileMenuOpen(false); }}
-              className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-semibold ${
-                activeTab === 'register' ? 'bg-cyan-500 text-slate-950' : 'text-slate-300 hover:bg-slate-800'
+              className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-semibold transition ${
+                activeTab === 'register' ? `bg-gradient-to-r ${activeBrandStyles.gradient} text-slate-950` : 'text-slate-300 hover:bg-slate-800'
               }`}
             >
               <UserPlus className="w-5 h-5" />
@@ -957,8 +1049,8 @@ export default function App() {
               <>
                 <button 
                   onClick={() => handleAdminTabAccess('admin-list')}
-                  className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-semibold ${
-                    activeTab === 'admin-list' ? 'bg-cyan-500 text-slate-950' : 'text-slate-300 hover:bg-slate-800'
+                  className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-semibold transition ${
+                    activeTab === 'admin-list' ? `bg-gradient-to-r ${activeBrandStyles.gradient} text-slate-950` : 'text-slate-300 hover:bg-slate-800'
                   }`}
                 >
                   <Users className="w-5 h-5" />
@@ -966,8 +1058,8 @@ export default function App() {
                 </button>
                 <button 
                   onClick={() => handleAdminTabAccess('roulette')}
-                  className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-semibold ${
-                    activeTab === 'roulette' ? 'bg-cyan-500 text-slate-950' : 'text-slate-300 hover:bg-slate-800'
+                  className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-semibold transition ${
+                    activeTab === 'roulette' ? `bg-gradient-to-r ${activeBrandStyles.gradient} text-slate-950` : 'text-slate-300 hover:bg-slate-800'
                   }`}
                 >
                   <Gift className="w-5 h-5" />
@@ -975,8 +1067,8 @@ export default function App() {
                 </button>
                 <button 
                   onClick={() => handleAdminTabAccess('manage-events')}
-                  className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-semibold ${
-                    activeTab === 'manage-events' ? 'bg-cyan-500 text-slate-950' : 'text-slate-300 hover:bg-slate-800'
+                  className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-semibold transition ${
+                    activeTab === 'manage-events' ? `bg-gradient-to-r ${activeBrandStyles.gradient} text-slate-950` : 'text-slate-300 hover:bg-slate-800'
                   }`}
                 >
                   <Calendar className="w-5 h-5" />
@@ -987,8 +1079,8 @@ export default function App() {
             
             <div className="pt-2 border-t border-slate-800/60">
               {isAdminAuthenticated ? (
-                <div className="flex items-center gap-2 px-4 py-2 text-xs text-cyan-400 font-bold">
-                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                <div className={`flex items-center gap-2 px-4 py-2 text-xs font-bold ${activeBrandStyles.textAccent}`}>
+                  <span className={`w-2.5 h-2.5 rounded-full animate-pulse ${activeBrand === 'sport' ? 'bg-cyan-400' : 'bg-red-500'}`}></span>
                   Sesión Admin Activa
                 </div>
               ) : (
@@ -996,7 +1088,7 @@ export default function App() {
                   onClick={() => { setShowPinModal(true); setMobileMenuOpen(false); }}
                   className="w-full flex items-center gap-2 px-4 py-2 text-xs bg-slate-800 text-slate-300 rounded-lg hover:text-white"
                 >
-                  <Lock className="w-4.5 h-4.5 text-cyan-400 mr-1" />
+                  <Lock className={`w-4.5 h-4.5 mr-1 ${activeBrandStyles.textAccent}`} />
                   Iniciar Sesión de Administrador
                 </button>
               )}
@@ -1005,11 +1097,11 @@ export default function App() {
         )}
       </header>
 
-      {/* Toast Notifications */}
+      {/* Toast de Notificación */}
       {notification && (
-        <div className="fixed top-24 right-4 z-50 animate-bounce-in max-w-sm w-full bg-slate-900 border-l-4 border-cyan-400 p-4 rounded-r-lg shadow-2xl flex items-start gap-3">
+        <div className={`fixed top-24 right-4 z-50 animate-bounce-in max-w-sm w-full bg-slate-900 border-l-4 p-4 rounded-r-lg shadow-2xl flex items-start gap-3 border-slate-800 ${activeBrand === 'sport' ? 'border-cyan-400' : 'border-red-500'}`}>
           {notification.type === 'success' ? (
-            <CheckCircle className="w-6 h-6 text-cyan-400 shrink-0" />
+            <CheckCircle className={`w-6 h-6 shrink-0 ${activeBrandStyles.textAccent}`} />
           ) : (
             <AlertCircle className="w-6 h-6 text-rose-500 shrink-0" />
           )}
@@ -1020,113 +1112,113 @@ export default function App() {
         </div>
       )}
 
-      {/* Main Container */}
+      {/* Contenedor Principal */}
       <main className="flex-grow max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
         
-        {/* Real-time Indicator Widget - Only visible to authenticated admins */}
+        {/* Widget de Servidor - Solo visible a Administradores */}
         {isAdminAuthenticated && (
           <div className="mb-6 flex flex-wrap gap-4 justify-between items-center bg-slate-900/40 p-3.5 rounded-xl border border-slate-800/80 animate-fade-in">
             <div className="flex items-center gap-2">
               <span className="relative flex h-3.5 w-3.5">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-3.5 w-3.5 bg-cyan-500"></span>
+                <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${activeBrand === 'sport' ? 'bg-cyan-400' : 'bg-red-500'}`}></span>
+                <span className={`relative inline-flex rounded-full h-3.5 w-3.5 ${activeBrand === 'sport' ? 'bg-cyan-500' : 'bg-red-500'}`}></span>
               </span>
               <p className="text-sm font-semibold text-slate-300">
-                Servidor Seguro de Llano Torneo Sport Sincronizado en la Nube
+                Servidor Seguro de Llano Torneo Sport & Gaming Sincronizado en la Nube
               </p>
             </div>
             <div className="flex gap-2 text-xs font-semibold">
               <span className="bg-slate-800 px-3 py-1.5 rounded-full text-slate-300">
                 {events.length} Eventos Activos
               </span>
-              <span className="bg-cyan-950 text-cyan-400 border border-cyan-900 px-3 py-1.5 rounded-full animate-pulse">
+              <span className={`border px-3 py-1.5 rounded-full animate-pulse ${activeBrand === 'sport' ? 'bg-cyan-950 text-cyan-400 border-cyan-900' : 'bg-red-950 text-red-500 border-red-900'}`}>
                 {participants.length} Registrados Totales
               </span>
             </div>
           </div>
         )}
 
-        {/* Tab 1: Registration Form */}
+        {/* Tab 1: Formulario de Registro */}
         {activeTab === 'register' && (
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
             
-            {/* Left Promotional Info Column */}
+            {/* Tarjeta Promocional adaptable */}
             <div className="lg:col-span-5 space-y-6">
               <div className="relative overflow-hidden bg-slate-900 rounded-2xl p-6 border border-slate-800">
-                <div className="absolute top-0 right-0 w-40 h-40 bg-cyan-500/10 rounded-full blur-3xl -z-10"></div>
+                <div className={`absolute top-0 right-0 w-40 h-40 rounded-full blur-3xl -z-10 opacity-10 ${activeBrand === 'sport' ? 'bg-cyan-500' : 'bg-red-500'}`}></div>
                 
-                {/* Visual Logo Centerpiece */}
+                {/* Logo Central de Marca */}
                 <div className="flex justify-center mb-6">
-                  <div className="p-1.5 rounded-2xl bg-slate-950 border border-slate-800 shadow-xl max-w-[180px] w-full">
+                  <div className="p-1.5 rounded-2xl bg-slate-950 border border-slate-800 shadow-xl max-w-[180px] w-full aspect-square flex items-center justify-center">
                     <img 
-                      src="image_a10aed.png" 
-                      alt="Logo Oficial Llano Torneo Sport" 
-                      className="rounded-xl w-full object-contain"
-                      onError={(e) => { e.target.style.display = 'none'; }}
+                      src={activeBrandStyles.logo} 
+                      alt={`Logo Oficial Llano Torneo ${activeBrandStyles.title}`} 
+                      className="rounded-xl w-full object-contain max-h-full"
+                      onError={handleImageError}
                     />
                   </div>
                 </div>
 
-                <h2 className="text-2xl font-black text-white text-center mb-2">REGISTRO DE PARTICIPANTES</h2>
+                <h2 className="text-xl sm:text-2xl font-black text-white text-center mb-2 uppercase">REGISTRO DE PARTICIPANTES</h2>
                 <p className="text-sm text-slate-400 text-center mb-6">
-                  Inscríbete seleccionando el evento en el que participarás. Tus datos quedarán blindados en la base de datos de manera permanente.
+                  Inscríbete seleccionando tu evento. Tus datos quedarán asegurados en nuestra base de datos permanente en la nube.
                 </p>
 
                 <div className="space-y-4">
                   <div className="flex items-start gap-3 bg-slate-950/60 p-3.5 rounded-xl border border-slate-800/50">
-                    <div className="p-2 bg-cyan-500/10 rounded-lg text-cyan-400 shrink-0">
-                      <Trophy className="w-5 h-5" />
+                    <div className={`p-2 rounded-lg shrink-0 ${activeBrandStyles.glowBg} ${activeBrandStyles.textAccent}`}>
+                      {activeBrand === 'sport' ? <Trophy className="w-5 h-5" /> : <Gamepad2 className="w-5 h-5" />}
                     </div>
                     <div>
-                      <h4 className="font-bold text-sm text-white">Eventos y Torneos</h4>
-                      <p className="text-xs text-slate-400">Escoge el evento oficial correspondiente para asegurar tu cupo y acreditación.</p>
+                      <h4 className="font-bold text-sm text-white">Eventos Deportivos & Gaming</h4>
+                      <p className="text-xs text-slate-400">Escoge el torneo o sorteo de tu preferencia para asegurar tu cupo y acreditación.</p>
                     </div>
                   </div>
 
                   <div className="flex items-start gap-3 bg-slate-950/60 p-3.5 rounded-xl border border-slate-800/50">
-                    <div className="p-2 bg-cyan-500/10 rounded-lg text-cyan-400 shrink-0">
+                    <div className={`p-2 rounded-lg shrink-0 ${activeBrandStyles.glowBg} ${activeBrandStyles.textAccent}`}>
                       <Gift className="w-5 h-5" />
                     </div>
                     <div>
                       <h4 className="font-bold text-sm text-white">Sorteos Integrados</h4>
-                      <p className="text-xs text-slate-400">Una vez registrado, ingresas directamente a la ruleta del evento para dinámicas en directo.</p>
+                      <p className="text-xs text-slate-400">Al registrarte, ingresas directamente a la ruleta del evento para sorteos interactivos en directo.</p>
                     </div>
                   </div>
 
                   <div className="flex items-start gap-3 bg-slate-950/60 p-3.5 rounded-xl border border-slate-800/50">
-                    <div className="p-2 bg-cyan-500/10 rounded-lg text-cyan-400 shrink-0">
+                    <div className={`p-2 rounded-lg shrink-0 ${activeBrandStyles.glowBg} ${activeBrandStyles.textAccent}`}>
                       <Activity className="w-5 h-5" />
                     </div>
                     <div>
                       <h4 className="font-bold text-sm text-white">Respaldo Inmune a Caídas</h4>
-                      <p className="text-xs text-slate-400">El sistema almacena tu formulario de forma instantánea garantizando que nada se borre.</p>
+                      <p className="text-xs text-slate-400">El servidor almacena tu información de manera instantánea garantizando seguridad absoluta.</p>
                     </div>
                   </div>
                 </div>
               </div>
 
-              {/* Fast access links */}
-              <div className="bg-gradient-to-r from-cyan-950/20 to-slate-900 border border-cyan-500/10 rounded-xl p-4 flex justify-between items-center">
+              {/* Acceso Rápido */}
+              <div className={`bg-gradient-to-r to-slate-900 border rounded-xl p-4 flex justify-between items-center transition-colors duration-300 ${activeBrand === 'sport' ? 'from-cyan-950/10 border-cyan-500/10' : 'from-red-950/10 border-red-500/10'}`}>
                 <div className="text-xs text-slate-400">
                   ¿Eres el organizador?
                 </div>
                 <button 
                   onClick={() => handleAdminTabAccess('admin-list')}
-                  className="text-xs font-bold text-cyan-400 hover:text-cyan-300 transition flex items-center gap-1"
+                  className={`text-xs font-bold transition flex items-center gap-1 ${activeBrandStyles.textAccent} ${activeBrandStyles.textAccentHover}`}
                 >
                   <Lock className="w-3 h-3" /> Panel Administrativo
                 </button>
               </div>
             </div>
 
-            {/* Right Form Column */}
+            {/* Formulario de Registro adaptable */}
             <div className="lg:col-span-7 bg-slate-900 rounded-2xl border border-slate-800 shadow-2xl overflow-hidden">
               <div className="bg-gradient-to-r from-slate-900 to-slate-800 p-6 border-b border-slate-800 flex items-center justify-between">
                 <div>
                   <h3 className="text-lg font-black text-white">FORMULARIO OFICIAL</h3>
-                  <p className="text-xs text-slate-400">Escribe tus datos reales para poder participar.</p>
+                  <p className="text-xs text-slate-400">Ingresa tus datos válidos para procesar tu participación.</p>
                 </div>
-                <div className="p-2 bg-cyan-400 text-slate-950 rounded-lg font-bold text-xs tracking-wider">
+                <div className={`p-2 rounded-lg font-bold text-xs tracking-wider text-slate-950 transition-colors duration-300 ${activeBrandStyles.bgAccent}`}>
                   PASO ÚNICO
                 </div>
               </div>
@@ -1140,7 +1232,7 @@ export default function App() {
                     'bg-slate-800 border border-slate-700 text-slate-300'
                   }`}>
                     {formStatus.type === 'loading' ? (
-                      <div className="w-5 h-5 border-2 border-cyan-400 border-t-transparent rounded-full animate-spin shrink-0"></div>
+                      <div className={`w-5 h-5 border-2 border-t-transparent rounded-full animate-spin shrink-0 ${activeBrand === 'sport' ? 'border-cyan-400' : 'border-red-500'}`}></div>
                     ) : formStatus.type === 'success' ? (
                       <CheckCircle className="w-5 h-5 text-emerald-400 shrink-0" />
                     ) : (
@@ -1151,7 +1243,7 @@ export default function App() {
                 )}
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  {/* Select Event */}
+                  {/* Selector de Evento */}
                   <div className="space-y-1.5 col-span-1 sm:col-span-2">
                     <label className="block text-xs font-bold uppercase tracking-wider text-slate-400">Selecciona el Evento al que te vas a registrar *</label>
                     <select 
@@ -1159,11 +1251,13 @@ export default function App() {
                       required
                       value={formData.evento}
                       onChange={handleInputChange}
-                      className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-cyan-400 transition"
+                      className={`w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:ring-1 transition-all ${activeBrand === 'sport' ? 'focus:border-cyan-400 focus:ring-cyan-500' : 'focus:border-red-500 focus:ring-red-500'}`}
                     >
                       {events.filter(ev => ev.activo !== false).length > 0 ? (
                         events.filter(ev => ev.activo !== false).map(ev => (
-                          <option key={ev.id} value={ev.nombre}>{ev.nombre}</option>
+                          <option key={ev.id} value={ev.nombre}>
+                            {ev.categoria === 'gaming' ? '🎮' : '⚽'} {ev.nombre}
+                          </option>
                         ))
                       ) : (
                         <option value="">No hay eventos activos disponibles para registros...</option>
@@ -1181,11 +1275,11 @@ export default function App() {
                       value={formData.nombreCompleto}
                       onChange={handleInputChange}
                       placeholder="Ej. Juan Carlos Ortega" 
-                      className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2.5 text-white placeholder-slate-600 focus:outline-none focus:border-cyan-400 transition"
+                      className={`w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2.5 text-white placeholder-slate-600 focus:outline-none focus:ring-1 transition-all ${activeBrand === 'sport' ? 'focus:border-cyan-400 focus:ring-cyan-500' : 'focus:border-red-500 focus:ring-red-500'}`}
                     />
                   </div>
 
-                  {/* Document ID */}
+                  {/* Documento */}
                   <div className="space-y-1.5">
                     <label className="block text-xs font-bold uppercase tracking-wider text-slate-400">Documento de Identificación *</label>
                     <input 
@@ -1197,7 +1291,7 @@ export default function App() {
                       value={formData.documento}
                       onChange={handleInputChange}
                       placeholder="Ej. 11223344" 
-                      className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2.5 text-white placeholder-slate-600 focus:outline-none focus:border-cyan-400 transition font-mono"
+                      className={`w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2.5 text-white placeholder-slate-600 focus:outline-none focus:ring-1 transition-all font-mono ${activeBrand === 'sport' ? 'focus:border-cyan-400 focus:ring-cyan-500' : 'focus:border-red-500 focus:ring-red-500'}`}
                     />
                   </div>
 
@@ -1213,7 +1307,7 @@ export default function App() {
                       value={formData.edad}
                       onChange={handleInputChange}
                       placeholder="Ej. 25" 
-                      className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2.5 text-white placeholder-slate-600 focus:outline-none focus:border-cyan-400 transition font-mono"
+                      className={`w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2.5 text-white placeholder-slate-600 focus:outline-none focus:ring-1 transition-all font-mono ${activeBrand === 'sport' ? 'focus:border-cyan-400 focus:ring-cyan-500' : 'focus:border-red-500 focus:ring-red-500'}`}
                     />
                   </div>
 
@@ -1227,7 +1321,7 @@ export default function App() {
                       value={formData.ciudadResidencia}
                       onChange={handleInputChange}
                       placeholder="Ej. Villavicencio" 
-                      className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2.5 text-white placeholder-slate-600 focus:outline-none focus:border-cyan-400 transition"
+                      className={`w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2.5 text-white placeholder-slate-600 focus:outline-none focus:ring-1 transition-all ${activeBrand === 'sport' ? 'focus:border-cyan-400 focus:ring-cyan-500' : 'focus:border-red-500 focus:ring-red-500'}`}
                     />
                   </div>
 
@@ -1243,11 +1337,11 @@ export default function App() {
                       value={formData.celular}
                       onChange={handleInputChange}
                       placeholder="Ej. 3123456789" 
-                      className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2.5 text-white placeholder-slate-600 focus:outline-none focus:border-cyan-400 transition font-mono"
+                      className={`w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2.5 text-white placeholder-slate-600 focus:outline-none focus:ring-1 transition-all font-mono ${activeBrand === 'sport' ? 'focus:border-cyan-400 focus:ring-cyan-500' : 'focus:border-red-500 focus:ring-red-500'}`}
                     />
                   </div>
 
-                  {/* Email */}
+                  {/* Correo Electrónico */}
                   <div className="space-y-1.5 col-span-1 sm:col-span-2">
                     <label className="block text-xs font-bold uppercase tracking-wider text-slate-400">Correo Electrónico *</label>
                     <input 
@@ -1257,12 +1351,12 @@ export default function App() {
                       value={formData.correo}
                       onChange={handleInputChange}
                       placeholder="ejemplo@correo.com" 
-                      className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2.5 text-white placeholder-slate-600 focus:outline-none focus:border-cyan-400 transition"
+                      className={`w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2.5 text-white placeholder-slate-600 focus:outline-none focus:ring-1 transition-all ${activeBrand === 'sport' ? 'focus:border-cyan-400 focus:ring-cyan-500' : 'focus:border-red-500 focus:ring-red-500'}`}
                     />
                   </div>
                 </div>
 
-                {/* Terms Acceptance */}
+                {/* Aceptación de Términos */}
                 <div className="flex items-start gap-3 pt-2">
                   <input 
                     type="checkbox" 
@@ -1271,18 +1365,18 @@ export default function App() {
                     required
                     checked={formData.terminos}
                     onChange={handleInputChange}
-                    className="mt-1 w-4 h-4 text-cyan-500 bg-slate-950 border-slate-800 rounded focus:ring-cyan-500 focus:ring-offset-slate-900 focus:ring-2"
+                    className={`mt-1 w-4 h-4 text-slate-950 bg-slate-950 border-slate-800 rounded focus:ring-offset-slate-900 focus:ring-2 ${activeBrand === 'sport' ? 'focus:ring-cyan-500' : 'focus:ring-red-500'}`}
                   />
                   <label htmlFor="terminos" className="text-xs text-slate-400 leading-normal select-none">
-                    Acepto que mis datos sean guardados en la nube de <span className="text-cyan-400">Llano Torneo Sport</span> para coordinar mi participación en eventos, sorteos y actividades interactivas relacionadas.
+                    Acepto que mis datos sean guardados en la nube de <span className={`font-bold ${activeBrandStyles.textAccent}`}>Llano Torneo {activeBrandStyles.title}</span> para coordinar mi participación en eventos, sorteos y actividades interactivas relacionadas.
                   </label>
                 </div>
 
-                {/* Submit button */}
+                {/* Botón de Enviar */}
                 <button 
                   type="submit" 
                   disabled={formStatus.type === 'loading'}
-                  className="w-full mt-2 bg-gradient-to-r from-cyan-400 to-sky-500 hover:from-cyan-300 hover:to-sky-400 text-slate-950 font-black tracking-wider text-sm py-4 rounded-xl shadow-lg hover:shadow-cyan-400/20 active:scale-[0.99] transition duration-150 flex items-center justify-center gap-2 uppercase"
+                  className={`w-full mt-2 bg-gradient-to-r text-slate-950 font-black tracking-wider text-sm py-4 rounded-xl shadow-lg active:scale-[0.99] transition-all duration-300 flex items-center justify-center gap-2 uppercase ${activeBrandStyles.gradient} ${activeBrandStyles.hoverGradient} ${activeBrandStyles.shadowAccent}`}
                 >
                   <UserPlus className="w-5 h-5 text-slate-950" />
                   Confirmar Registro
@@ -1292,20 +1386,20 @@ export default function App() {
           </div>
         )}
 
-        {/* Tab 2: Admin Registered List (Filtered with Event Tabs) */}
+        {/* Tab 2: Panel de Registrados */}
         {activeTab === 'admin-list' && isAdminAuthenticated && (
           <div className="bg-slate-900 rounded-2xl border border-slate-800 shadow-2xl overflow-hidden animate-fade-in">
             
             <div className="p-6 border-b border-slate-800 bg-gradient-to-r from-slate-900 to-slate-800 flex flex-wrap gap-4 items-center justify-between">
               <div>
                 <h3 className="text-lg font-black text-white flex items-center gap-2">
-                  <Users className="w-5 h-5 text-cyan-400" />
-                  CONTROL DE PARTICIPANTES POR EVENTO
+                  <Users className={`w-5 h-5 ${activeBrandStyles.textAccent}`} />
+                  CONTROL DE PARTICIPANTES MULTI-EVENTO
                 </h3>
-                <p className="text-xs text-slate-400">Base de datos permanente. Organizada por filtros individuales por evento.</p>
+                <p className="text-xs text-slate-400">Base de datos estructurada con persistencia de doble marca.</p>
               </div>
 
-              {/* CSV Export and Corporate Excel Trigger */}
+              {/* Descarga de CSV y Excel */}
               <div className="flex flex-wrap gap-3">
                 <button 
                   onClick={handleExportCSV}
@@ -1315,17 +1409,17 @@ export default function App() {
                 </button>
                 <button 
                   onClick={handleExportExcel}
-                  className="bg-gradient-to-r from-cyan-400 to-sky-500 hover:from-cyan-300 hover:to-sky-400 text-slate-950 font-black px-4 py-2.5 rounded-lg flex items-center gap-1.5 transition shadow-lg shadow-cyan-400/20"
+                  className={`bg-gradient-to-r text-slate-950 font-black px-4 py-2.5 rounded-lg flex items-center gap-1.5 transition shadow-lg ${activeBrandStyles.gradient} ${activeBrandStyles.hoverGradient} ${activeBrandStyles.shadowAccent}`}
                 >
                   <Trophy className="w-4 h-4 text-slate-950" /> Exportar a Excel (.xls)
                 </button>
               </div>
             </div>
 
-            {/* Event Selector Panels */}
+            {/* Selectores de Filtro de Evento */}
             <div className="bg-slate-950/40 p-4 border-b border-slate-800">
               <span className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-2 flex items-center gap-1">
-                <Filter className="w-3.5 h-3.5 text-cyan-400" /> Selecciona el panel de evento para filtrar participantes:
+                <Filter className={`w-3.5 h-3.5 ${activeBrandStyles.textAccent}`} /> Filtro de Selección de Eventos:
               </span>
               
               <div className="flex flex-wrap gap-2">
@@ -1333,7 +1427,7 @@ export default function App() {
                   onClick={() => setSelectedAdminEvent('all')}
                   className={`px-4 py-2 rounded-lg text-xs font-bold transition ${
                     selectedAdminEvent === 'all'
-                      ? 'bg-cyan-500 text-slate-950 font-black shadow-lg shadow-cyan-500/10'
+                      ? 'bg-slate-200 text-slate-950 font-black shadow-lg shadow-slate-500/10'
                       : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
                   }`}
                 >
@@ -1341,33 +1435,36 @@ export default function App() {
                 </button>
                 {events.map((ev) => {
                   const eventCount = participants.filter(p => p.evento === ev.nombre).length;
+                  const isGaming = ev.categoria === 'gaming';
                   return (
                     <button
                       key={ev.id}
                       onClick={() => setSelectedAdminEvent(ev.nombre)}
                       className={`px-4 py-2 rounded-lg text-xs font-bold transition ${
                         selectedAdminEvent === ev.nombre
-                          ? 'bg-cyan-500 text-slate-950 font-black shadow-lg shadow-cyan-500/10'
+                          ? isGaming
+                            ? 'bg-red-500 text-slate-950 font-black shadow-lg shadow-red-500/10'
+                            : 'bg-cyan-400 text-slate-950 font-black shadow-lg shadow-cyan-500/10'
                           : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
                       }`}
                     >
-                      📅 {ev.nombre} ({eventCount})
+                      {isGaming ? '🎮' : '⚽'} {ev.nombre} ({eventCount})
                     </button>
                   );
                 })}
               </div>
             </div>
 
-            {/* Quick Stats on Filtered Group */}
+            {/* Métricas rápidas */}
             <div className="grid grid-cols-2 md:grid-cols-4 border-b border-slate-800 bg-slate-950/20 text-center text-xs">
               <div className="p-4 border-r border-slate-800">
-                <span className="block text-[10px] font-black tracking-widest text-slate-500 uppercase">Panel Seleccionado</span>
-                <span className="text-sm font-bold text-cyan-400 truncate block max-w-[200px] mx-auto block">
+                <span className="block text-[10px] font-black tracking-widest text-slate-500 uppercase">Filtro Seleccionado</span>
+                <span className={`text-sm font-bold truncate block max-w-[200px] mx-auto ${activeBrandStyles.textAccent}`}>
                   {selectedAdminEvent === 'all' ? 'Todos los Eventos' : selectedAdminEvent}
                 </span>
               </div>
               <div className="p-4 border-r border-slate-800">
-                <span className="block text-[10px] font-black tracking-widest text-slate-500 uppercase">Registrados en Filtro</span>
+                <span className="block text-[10px] font-black tracking-widest text-slate-500 uppercase">Inscritos en Filtro</span>
                 <span className="text-xl font-black text-white">
                   {participants.filter(p => selectedAdminEvent === 'all' || p.evento === selectedAdminEvent).length}
                 </span>
@@ -1381,14 +1478,14 @@ export default function App() {
                 </span>
               </div>
               <div className="p-4">
-                <span className="block text-[10px] font-black tracking-widest text-slate-500 uppercase">Fecha Actual</span>
-                <span className="text-xs font-bold text-white font-mono mt-1 block">
-                  {new Date().toLocaleDateString()}
+                <span className="block text-[10px] font-black tracking-widest text-slate-500 uppercase">Categoría Principal</span>
+                <span className="text-xs font-bold text-white uppercase mt-1 block">
+                  {selectedAdminEvent === 'all' ? 'Doble Marca' : getEventBrand(selectedAdminEvent) === 'gaming' ? '🎮 Gaming E-Sports' : '⚽ Deporte Sport'}
                 </span>
               </div>
             </div>
 
-            {/* Search filter bar */}
+            {/* Barra de buscador */}
             <div className="p-4 bg-slate-950/20 border-b border-slate-800">
               <div className="relative">
                 <Search className="absolute left-3.5 top-3.5 w-4 h-4 text-slate-500" />
@@ -1396,13 +1493,13 @@ export default function App() {
                   type="text" 
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Buscar participante por nombre o documento..." 
-                  className="w-full bg-slate-950 border border-slate-800 rounded-lg pl-10 pr-4 py-2.5 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-cyan-400 transition"
+                  placeholder="Buscar por nombre o cédula..." 
+                  className={`w-full bg-slate-950 border border-slate-800 rounded-lg pl-10 pr-4 py-2.5 text-sm text-white placeholder-slate-600 focus:outline-none focus:ring-1 transition-all ${activeBrand === 'sport' ? 'focus:border-cyan-400 focus:ring-cyan-500' : 'focus:border-red-500 focus:ring-red-500'}`}
                 />
               </div>
             </div>
 
-            {/* Table Area */}
+            {/* Tabla de Datos */}
             <div className="overflow-x-auto">
               <table className="w-full text-left border-collapse">
                 <thead>
@@ -1410,8 +1507,8 @@ export default function App() {
                     <th className="p-4">Participante</th>
                     <th className="p-4">Identificación</th>
                     <th className="p-4">Contacto</th>
+                    <th className="p-4">Categoría</th>
                     <th className="p-4">Evento Asociado</th>
-                    <th className="p-4">Fecha de Registro</th>
                     <th className="p-4 text-center">Acción</th>
                   </tr>
                 </thead>
@@ -1434,48 +1531,57 @@ export default function App() {
                             (p.documento || '').toLowerCase().includes(query)
                           );
                         })
-                        .map((p) => (
-                          <tr key={p.id} className="hover:bg-slate-800/40 transition text-sm">
-                            <td className="p-4 font-bold text-white">
-                              {p.nombreCompleto}
-                              <div className="text-[10px] text-slate-400 font-normal mt-0.5">
-                                Edad: {p.edad || 'N/A'} años | Ciudad: {p.ciudadResidencia || 'N/A'}
-                              </div>
-                            </td>
-                            <td className="p-4 text-slate-300 font-mono">{p.documento}</td>
-                            <td className="p-4">
-                              <div className="flex flex-col gap-0.5 text-xs text-slate-300">
-                                <span className="flex items-center gap-1 font-mono">
-                                  <Phone className="w-3 h-3 text-cyan-400" /> {p.celular}
+                        .map((p) => {
+                          const itemBrand = getEventBrand(p.evento);
+                          return (
+                            <tr key={p.id} className="hover:bg-slate-800/40 transition text-sm">
+                              <td className="p-4 font-bold text-white">
+                                {p.nombreCompleto}
+                                <div className="text-[10px] text-slate-400 font-normal mt-0.5">
+                                  Edad: {p.edad || 'N/A'} años | Ciudad: {p.ciudadResidencia || 'N/A'}
+                                </div>
+                              </td>
+                              <td className="p-4 text-slate-300 font-mono">{p.documento}</td>
+                              <td className="p-4">
+                                <div className="flex flex-col gap-0.5 text-xs text-slate-300">
+                                  <span className="flex items-center gap-1 font-mono">
+                                    <Phone className="w-3 h-3 text-slate-400" /> {p.celular}
+                                  </span>
+                                  <span className="flex items-center gap-1 text-slate-400 font-mono">
+                                    <Mail className="w-3 h-3 text-slate-500" /> {p.correo}
+                                  </span>
+                                </div>
+                              </td>
+                              <td className="p-4">
+                                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold tracking-wider ${
+                                  itemBrand === 'gaming' 
+                                    ? 'bg-red-950/60 text-red-400 border border-red-900/40' 
+                                    : 'bg-cyan-950/60 text-cyan-400 border border-cyan-900/40'
+                                }`}>
+                                  {itemBrand === 'gaming' ? '🎮 Gaming' : '⚽ Sport'}
                                 </span>
-                                <span className="flex items-center gap-1 text-slate-400 font-mono">
-                                  <Mail className="w-3 h-3 text-slate-500" /> {p.correo}
+                              </td>
+                              <td className="p-4">
+                                <span className="bg-slate-950 px-2.5 py-1 rounded-full text-xs font-bold text-slate-300 border border-slate-800/80 block w-fit truncate max-w-[200px]" title={p.evento}>
+                                  {p.evento}
                                 </span>
-                              </div>
-                            </td>
-                            <td className="p-4">
-                              <span className="bg-slate-950 px-2.5 py-1 rounded-full text-xs font-bold text-cyan-400 border border-cyan-900/40 block w-fit truncate max-w-[200px]">
-                                {p.evento}
-                              </span>
-                            </td>
-                            <td className="p-4 text-slate-400 text-xs font-mono">
-                              {new Date(p.fechaRegistro).toLocaleString()}
-                            </td>
-                            <td className="p-4 text-center">
-                              <button 
-                                onClick={() => requestDeleteParticipant(p.id, p.nombreCompleto)}
-                                className="p-2 text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 rounded-lg transition"
-                                title="Eliminar inscripción"
-                              >
-                                <Trash2 className="w-4.5 h-4.5" />
-                              </button>
-                            </td>
-                          </tr>
-                        ))
+                              </td>
+                              <td className="p-4 text-center">
+                                <button 
+                                  onClick={() => requestDeleteParticipant(p.id, p.nombreCompleto)}
+                                  className="p-2 text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 rounded-lg transition"
+                                  title="Eliminar inscripción"
+                                >
+                                  <Trash2 className="w-4.5 h-4.5" />
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })
                     ) : (
                       <tr>
                         <td colSpan="6" className="p-12 text-center text-slate-500 text-sm">
-                          No hay registros de inscripción para este evento.
+                          No hay registros de inscripción con los filtros seleccionados.
                         </td>
                       </tr>
                     )}
@@ -1485,19 +1591,19 @@ export default function App() {
           </div>
         )}
 
-        {/* Tab 3: Sorteo / Live Interactive Roulette */}
+        {/* Tab 3: Ruleta Electrónica de Sorteos */}
         {activeTab === 'roulette' && isAdminAuthenticated && (
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-stretch animate-fade-in">
             
-            {/* Roulette Spinning Area */}
+            {/* Área de Ruleta adaptable */}
             <div className="lg:col-span-7 bg-slate-900 rounded-2xl border border-slate-800 p-6 flex flex-col justify-between items-center relative overflow-hidden shadow-2xl">
-              <div className="absolute top-0 left-0 w-32 h-32 bg-cyan-400/5 rounded-full blur-2xl"></div>
+              <div className={`absolute top-0 left-0 w-32 h-32 rounded-full blur-2xl opacity-10 ${activeBrand === 'sport' ? 'bg-cyan-400' : 'bg-red-500'}`}></div>
               
               <div className="w-full text-center mb-4">
-                <span className="bg-cyan-500/10 text-cyan-400 border border-cyan-800 text-xs px-3 py-1 rounded-full font-bold uppercase tracking-wider">
-                  Sorteos en Directo
+                <span className={`border text-xs px-3 py-1 rounded-full font-bold uppercase tracking-wider ${activeBrand === 'sport' ? 'bg-cyan-500/10 text-cyan-400 border-cyan-800' : 'bg-red-500/10 text-red-500 border-red-800'}`}>
+                  Sorteos en Directo - Llano {activeBrandStyles.title}
                 </span>
-                <h3 className="text-xl font-black text-white mt-2">RULETA ELECTRÓNICA</h3>
+                <h3 className="text-xl font-black text-white mt-2 uppercase">RULETA ELECTRÓNICA</h3>
                 
                 <div className="mt-4 max-w-sm mx-auto">
                   <label className="block text-xs font-bold text-slate-400 mb-1.5 uppercase tracking-wider">
@@ -1506,18 +1612,22 @@ export default function App() {
                   <select
                     value={selectedRouletteEvent}
                     onChange={(e) => setSelectedRouletteEvent(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs font-bold text-cyan-400 focus:outline-none focus:border-cyan-400 transition"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs font-bold text-slate-300 focus:outline-none focus:border-cyan-400 transition"
                   >
                     {events.map((ev) => (
-                      <option key={ev.id} value={ev.nombre}>{ev.nombre}</option>
+                      <option key={ev.id} value={ev.nombre}>
+                        {ev.categoria === 'gaming' ? '🎮' : '⚽'} {ev.nombre}
+                      </option>
                     ))}
                   </select>
                 </div>
               </div>
 
+              {/* Contenedor del Canvas de la Ruleta */}
               <div className="relative my-4 flex items-center justify-center">
-                <div className="absolute -top-3 z-30 drop-shadow-[0_4px_6px_rgba(0,229,255,0.4)] animate-bounce">
-                  <div className="w-8 h-8 bg-cyan-400 rotate-45 transform origin-center border-2 border-white rounded-br-md"></div>
+                {/* Flecha indicadora adaptable */}
+                <div className={`absolute -top-3.5 z-30 drop-shadow-lg animate-bounce`}>
+                  <div className={`w-8 h-8 rotate-45 transform origin-center border-2 border-white rounded-br-md ${activeBrand === 'sport' ? 'bg-cyan-400' : 'bg-red-500'}`}></div>
                 </div>
 
                 <canvas 
@@ -1528,6 +1638,7 @@ export default function App() {
                 />
               </div>
 
+              {/* Botón de Giro Adaptable */}
               <div className="w-full max-w-sm mt-4">
                 <button 
                   onClick={spinTheWheel}
@@ -1537,7 +1648,7 @@ export default function App() {
                       ? 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700' 
                       : roulettePool.length === 0 
                         ? 'bg-slate-800 text-slate-400 border border-slate-700 cursor-not-allowed'
-                        : 'bg-gradient-to-r from-cyan-400 to-sky-500 hover:from-cyan-300 hover:to-sky-400 text-slate-950 hover:shadow-cyan-400/20'
+                        : `bg-gradient-to-r text-slate-950 hover:shadow-lg ${activeBrandStyles.gradient} ${activeBrandStyles.hoverGradient} ${activeBrandStyles.shadowAccent}`
                   }`}
                 >
                   {isSpinning ? '¡GIRANDO RÁPIDAMENTE!' : roulettePool.length === 0 ? 'Faltan Inscritos para Iniciar' : '🔥 ¡GIRAR RULETA AHORA! 🔥'}
@@ -1545,16 +1656,16 @@ export default function App() {
               </div>
             </div>
 
-            {/* Event Participant Sidebar List */}
+            {/* Sidebar de Bombo de Participantes */}
             <div className="lg:col-span-5 bg-slate-900 rounded-2xl border border-slate-800 p-6 flex flex-col justify-between shadow-2xl">
               <div>
                 <h4 className="font-black text-white border-b border-slate-800 pb-3 uppercase tracking-wider text-sm flex items-center gap-2">
-                  <Award className="w-4.5 h-4.5 text-cyan-400" />
+                  <Award className={`w-4.5 h-4.5 ${activeBrandStyles.textAccent}`} />
                   Bombo de Participantes ({roulettePool.length})
                 </h4>
                 
                 <p className="text-xs text-slate-400 my-3">
-                  Solo los inscritos que correspondan al evento seleccionado entrarán al sorteo actual.
+                  Solo las personas registradas en el torneo seleccionado ingresarán al sorteo dinámico actual.
                 </p>
 
                 <div className="space-y-2 max-h-[350px] overflow-y-auto pr-1">
@@ -1565,51 +1676,48 @@ export default function App() {
                         className="flex items-center justify-between bg-slate-950/60 p-3 rounded-lg border border-slate-800/80 text-xs"
                       >
                         <div className="font-bold text-slate-200">{p.nombreCompleto}</div>
-                        <div className="text-[10px] uppercase font-semibold text-cyan-400 bg-cyan-950/40 px-2.5 py-0.5 rounded border border-cyan-900/30 font-mono tracking-wider">
+                        <div className={`text-[10px] uppercase font-semibold px-2.5 py-0.5 rounded border font-mono tracking-wider ${activeBrandStyles.textAccent} ${activeBrandStyles.bgAccentLight} ${activeBrandStyles.borderAccentLight}`}>
                           {p.documento}
                         </div>
                       </div>
                     ))
                   ) : (
                     <div className="text-center py-10 text-slate-500 text-xs border-2 border-dashed border-slate-800 rounded-xl">
-                      ⚠️ No hay nadie registrado en este evento aún. 
-                      <p className="mt-2 text-[10px] text-slate-600">Completa una prueba registrándote en este evento en la primera pestaña.</p>
+                      ⚠️ No hay nadie registrado en este evento aún.
                     </div>
                   )}
                 </div>
               </div>
 
               <div className="pt-6 border-t border-slate-800 mt-6 bg-slate-950/25 p-4 rounded-xl">
-                <h5 className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-1.5">Instrucciones del Directo</h5>
+                <h5 className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-1.5">Instrucciones de Pantalla</h5>
                 <ul className="text-[11px] text-slate-400 space-y-1.5 list-disc pl-4">
-                  <li>Selecciona el evento deportivo arriba para cambiar de bombo instantáneamente.</li>
-                  <li>Puedes proyectar esta pestaña en el directo de redes sociales o pantallas de la tarima.</li>
+                  <li>Elige el evento para cambiar de marca de forma instantánea.</li>
+                  <li>Puedes proyectar este sistema en transmisiones en directo o pantallas de tarima.</li>
                 </ul>
               </div>
             </div>
           </div>
         )}
 
-        {/* Tab 4: Event Creator & Management */}
+        {/* Tab 4: Gestión de Eventos */}
         {activeTab === 'manage-events' && isAdminAuthenticated && (
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start animate-fade-in">
-            {/* Left side: Create/Edit Event Form */}
+            {/* Formulario de Creación / Edición */}
             <div className="lg:col-span-5 bg-slate-900 rounded-2xl border border-slate-800 p-6 shadow-2xl">
               <h3 className="text-md font-black text-white uppercase tracking-wider mb-2 flex items-center gap-2">
                 {isEditingEvent ? (
                   <>
-                    <Pencil className="w-5 h-5 text-amber-400" /> Editar Evento
+                    <Pencil className="w-5 h-5 text-amber-400" /> Editar Evento Configurado
                   </>
                 ) : (
                   <>
-                    <PlusCircle className="w-5 h-5 text-cyan-400" /> Crear Nuevo Evento
+                    <PlusCircle className="w-5 h-5 text-cyan-400" /> Registrar Evento Nuevo
                   </>
                 )}
               </h3>
               <p className="text-xs text-slate-400 mb-6">
-                {isEditingEvent 
-                  ? 'Modifica los detalles del evento seleccionado. Los cambios se guardarán de inmediato.' 
-                  : 'Agrega eventos para que queden disponibles inmediatamente en el formulario de registro del público.'}
+                Define las características y asócialo a la marca correspondiente para actualizar el catálogo.
               </p>
 
               <form onSubmit={handleCreateEvent} className="space-y-4">
@@ -1620,9 +1728,38 @@ export default function App() {
                     required
                     value={newEvent.nombre}
                     onChange={(e) => setNewEvent(prev => ({ ...prev, nombre: e.target.value }))}
-                    placeholder="Ej. Copa Futsal Llano 2026" 
+                    placeholder="Ej. Torneo de Integración Fútsal" 
                     className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2.5 text-white placeholder-slate-600 focus:outline-none focus:border-cyan-400 transition text-sm"
                   />
+                </div>
+
+                {/* NUEVO: Selector de Categoría (Sport / Gaming) */}
+                <div className="space-y-1.5">
+                  <label className="block text-xs font-bold uppercase text-slate-400">Categoría de la Marca *</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setNewEvent(prev => ({ ...prev, categoria: 'sport' }))}
+                      className={`py-2 px-3 rounded-lg text-xs font-bold border transition flex items-center justify-center gap-1.5 ${
+                        newEvent.categoria === 'sport'
+                          ? 'bg-cyan-950 text-cyan-400 border-cyan-500/50'
+                          : 'bg-slate-950 text-slate-500 border-slate-800 hover:border-slate-700'
+                      }`}
+                    >
+                      ⚽ Deporte (Sport)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setNewEvent(prev => ({ ...prev, categoria: 'gaming' }))}
+                      className={`py-2 px-3 rounded-lg text-xs font-bold border transition flex items-center justify-center gap-1.5 ${
+                        newEvent.categoria === 'gaming'
+                          ? 'bg-red-950 text-red-500 border-red-500/50'
+                          : 'bg-slate-950 text-slate-500 border-slate-800 hover:border-slate-700'
+                      }`}
+                    >
+                      🎮 Videojuegos (Gaming)
+                    </button>
+                  </div>
                 </div>
 
                 <div className="space-y-1">
@@ -1630,7 +1767,7 @@ export default function App() {
                   <textarea 
                     value={newEvent.descripcion}
                     onChange={(e) => setNewEvent(prev => ({ ...prev, descripcion: e.target.value }))}
-                    placeholder="Escribe detalles del torneo o rifa" 
+                    placeholder="Detalles sobre premios, consolas o categorías..." 
                     className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2.5 text-white placeholder-slate-600 focus:outline-none focus:border-cyan-400 transition text-sm h-24 resize-none"
                   />
                 </div>
@@ -1655,7 +1792,7 @@ export default function App() {
                       </>
                     ) : (
                       <>
-                        <Plus className="w-4 h-4" /> Registrar Evento Nuevo
+                        <Plus className="w-4 h-4" /> Registrar Evento
                       </>
                     )}
                   </button>
@@ -1663,40 +1800,48 @@ export default function App() {
               </form>
             </div>
 
-            {/* Right side: Event List & Status */}
+            {/* Listado de Eventos Creados */}
             <div className="lg:col-span-7 bg-slate-900 rounded-2xl border border-slate-800 p-6 shadow-2xl">
               <h3 className="text-md font-black text-white uppercase tracking-wider mb-2">
-                Eventos Creados en la Plataforma ({events.length})
+                Eventos Disponibles en la Plataforma ({events.length})
               </h3>
               <p className="text-xs text-slate-400 mb-6">
-                Lista de todos los eventos configurados en tiempo real.
+                Lista de actividades asociadas con sincronización instantánea a la nube.
               </p>
 
               <div className="space-y-3 max-h-[400px] overflow-y-auto pr-1">
                 {events.map((ev) => {
                   const registrations = participants.filter(p => p.evento === ev.nombre).length;
+                  const isGaming = ev.categoria === 'gaming';
                   return (
                     <div key={ev.id} className="bg-slate-950 border border-slate-800/80 p-4 rounded-xl flex items-center justify-between gap-4">
                       <div>
                         <div className="flex items-center gap-2 flex-wrap">
                           <h4 className="font-bold text-sm text-white">{ev.nombre}</h4>
                           <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold tracking-wider ${
+                            isGaming 
+                              ? 'bg-red-950/60 text-red-400 border border-red-900/40' 
+                              : 'bg-cyan-950/60 text-cyan-400 border border-cyan-900/40'
+                          }`}>
+                            {isGaming ? '🎮 Gaming' : '⚽ Sport'}
+                          </span>
+                          <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold tracking-wider ${
                             ev.activo !== false 
-                              ? 'bg-emerald-950/60 text-emerald-400 border border-emerald-900/40' 
+                              ? 'bg-slate-800 text-emerald-400 border border-emerald-900/40' 
                               : 'bg-slate-800 text-slate-400 border border-slate-700/40'
                           }`}>
-                            {ev.activo !== false ? 'Activo' : 'Pausado'}
+                            {ev.activo !== false ? 'Activo' : 'Inactivo'}
                           </span>
                         </div>
                         <p className="text-xs text-slate-400 mt-1">{ev.descripcion}</p>
                         <span className="inline-block mt-2 text-[10px] font-mono text-slate-500">
-                          ID: <span className="text-cyan-500">{ev.id}</span> | Creado: {ev.fechaCreado ? new Date(ev.fechaCreado).toLocaleDateString() : 'Por defecto'}
+                          ID: <span className="text-slate-400">{ev.id}</span> | Creado: {ev.fechaCreado ? new Date(ev.fechaCreado).toLocaleDateString() : 'Predeterminado'}
                         </span>
                       </div>
 
                       <div className="flex items-center gap-2 shrink-0">
                         <div className="text-right mr-2">
-                          <span className="block text-xs font-bold text-cyan-400">{registrations}</span>
+                          <span className="block text-xs font-bold text-slate-300">{registrations}</span>
                           <span className="text-[9px] text-slate-500 uppercase font-bold">Inscritos</span>
                         </div>
                         <button 
@@ -1734,13 +1879,13 @@ export default function App() {
         )}
       </main>
 
-      {/* MODAL 1: Admin Access Authentication */}
+      {/* MODAL 1: Autenticación de Organizador */}
       {showPinModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4 animate-fade-in">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-6 shadow-2xl">
             <div className="flex justify-between items-start mb-4">
               <div className="flex items-center gap-2">
-                <Lock className="w-5 h-5 text-cyan-400" />
+                <Lock className={`w-5 h-5 ${activeBrandStyles.textAccent}`} />
                 <h3 className="text-lg font-black text-white uppercase">Acceso Organizadores</h3>
               </div>
               <button 
@@ -1752,7 +1897,7 @@ export default function App() {
             </div>
 
             <p className="text-xs text-slate-400 mb-4">
-              Introduce el PIN de organizador para administrar la base de datos de inscritos y operar los sorteos de la ruleta.
+              Ingresa el PIN de seguridad para administrar la plataforma, cambiar la visibilidad de inscritos y operar la ruleta electrónica.
             </p>
 
             <form onSubmit={handleAdminAuth} className="space-y-4">
@@ -1767,12 +1912,12 @@ export default function App() {
                   autoFocus
                 />
                 {adminError && <p className="text-xs text-rose-400 mt-1 font-semibold">{adminError}</p>}
-                <p className="text-[10px] text-slate-500 mt-2">*(PIN de prueba: <span className="text-cyan-400 font-mono">admin</span>, <span className="text-cyan-400 font-mono">1234</span> o <span className="text-cyan-400 font-mono">llanotorneos123</span>)</p>
+                <p className="text-[10px] text-slate-500 mt-2">*(PIN por defecto: <span className="text-cyan-400 font-mono">admin</span> o <span className="text-cyan-400 font-mono">llanotorneos123</span>)</p>
               </div>
 
               <button 
                 type="submit"
-                className="w-full bg-cyan-400 hover:bg-cyan-300 text-slate-950 font-black tracking-wider text-xs py-3 rounded-lg uppercase transition"
+                className={`w-full text-slate-950 font-black tracking-wider text-xs py-3 rounded-lg uppercase transition-all duration-300 bg-gradient-to-r ${activeBrandStyles.gradient} ${activeBrandStyles.hoverGradient}`}
               >
                 Validar Credencial
               </button>
@@ -1781,18 +1926,18 @@ export default function App() {
         </div>
       )}
 
-      {/* MODAL 2: Winner Announcement Celebration */}
+      {/* MODAL 2: Celebración del Ganador Adaptable */}
       {showWinnerModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/90 backdrop-blur-md p-4 animate-fade-in">
-          <div className="bg-slate-900 border-2 border-cyan-400 rounded-3xl max-w-lg w-full p-8 shadow-2xl text-center relative overflow-hidden">
-            <div className="absolute top-0 left-0 right-0 h-2 bg-gradient-to-r from-cyan-400 via-sky-500 to-indigo-600"></div>
+          <div className={`bg-slate-900 border-2 rounded-3xl max-w-lg w-full p-8 shadow-2xl text-center relative overflow-hidden transition-all duration-500 ${activeBrand === 'sport' ? 'border-cyan-400' : 'border-red-500'}`}>
+            <div className={`absolute top-0 left-0 right-0 h-2 bg-gradient-to-r ${activeBrandStyles.gradient}`}></div>
             
             <div className="my-4">
               <span className="text-5xl block animate-bounce">🏆</span>
             </div>
 
-            <span className="bg-cyan-500/10 text-cyan-400 border border-cyan-500/30 text-xs px-3 py-1 rounded-full font-bold uppercase tracking-widest">
-              ¡TENEMOS UN GANADOR DEL EVENTO!
+            <span className={`text-xs px-3 py-1 rounded-full font-bold uppercase tracking-widest border ${activeBrandStyles.glowBg} ${activeBrandStyles.textAccent} ${activeBrandStyles.borderAccent}`}>
+              ¡TENEMOS UN GANADOR DEL SORTEO!
             </span>
 
             <h2 className="text-3xl sm:text-4xl font-black text-white mt-4 tracking-tight uppercase break-words px-2">
@@ -1800,14 +1945,14 @@ export default function App() {
             </h2>
 
             {winnerDoc && (
-              <div className="mt-2.5 inline-flex items-center gap-1.5 bg-slate-950/60 border border-cyan-900/40 px-4 py-1.5 rounded-full text-xs font-mono font-bold text-cyan-400 shadow-inner">
+              <div className={`mt-2.5 inline-flex items-center gap-1.5 bg-slate-950/60 border px-4 py-1.5 rounded-full text-xs font-mono font-bold shadow-inner ${activeBrandStyles.textAccent} ${activeBrandStyles.borderAccentLight}`}>
                 <span>Documento:</span>
                 <span className="tracking-wider">•••• {winnerDoc.trim().slice(-4)}</span>
               </div>
             )}
 
             <p className="text-xs text-slate-400 mt-4 max-w-sm mx-auto">
-              Ganador seleccionado al azar de manera transparente mediante la ruleta oficial de Llano Torneo Sport. ¡Felicidades!
+              Ganador seleccionado de manera aleatoria, transparente y auditada en la ruleta de Llano Torneo {activeBrandStyles.title}. ¡Felicitaciones!
             </p>
 
             <div className="mt-8 flex flex-col gap-2 max-w-xs mx-auto">
@@ -1816,7 +1961,7 @@ export default function App() {
                   setShowWinnerModal(false);
                   setWinnerDoc('');
                 }}
-                className="w-full bg-gradient-to-r from-cyan-400 to-sky-500 hover:from-cyan-300 hover:to-sky-400 text-slate-950 font-black text-xs py-3.5 rounded-xl uppercase tracking-wider transition shadow-lg shadow-cyan-400/20"
+                className={`w-full text-slate-950 font-black text-xs py-3.5 rounded-xl uppercase tracking-wider transition duration-300 shadow-lg bg-gradient-to-r ${activeBrandStyles.gradient} ${activeBrandStyles.hoverGradient} ${activeBrandStyles.shadowAccent}`}
               >
                 Cerrar y Seguir Sorteos
               </button>
@@ -1825,7 +1970,7 @@ export default function App() {
         </div>
       )}
 
-      {/* MODAL 3: Delete Participant Confirmation */}
+      {/* MODAL 3: Eliminar Participante */}
       {deleteTargetId && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4 animate-fade-in">
           <div className="bg-slate-900 border border-slate-800 rounded-xl max-w-sm w-full p-6 shadow-2xl">
@@ -1833,7 +1978,7 @@ export default function App() {
               <AlertCircle className="w-5 h-5 text-rose-500" /> Confirmar Eliminación
             </h3>
             <p className="text-xs text-slate-400 mb-6">
-              ¿Estás seguro de que deseas eliminar la inscripción de <span className="text-cyan-400 font-bold">"{deleteTargetName}"</span>? Esta acción se guardará en la nube inmediatamente y removerá a la persona de la ruleta del evento.
+              ¿Estás seguro de que deseas eliminar permanentemente la inscripción de <span className={`font-bold ${activeBrandStyles.textAccent}`}>"{deleteTargetName}"</span>? Se borrará de la ruleta actual.
             </p>
             <div className="flex gap-3 justify-end">
               <button 
@@ -1853,7 +1998,7 @@ export default function App() {
         </div>
       )}
 
-      {/* MODAL 4: Delete Event Confirmation */}
+      {/* MODAL 4: Eliminar Evento */}
       {deleteEventTarget && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4 animate-fade-in">
           <div className="bg-slate-900 border border-slate-800 rounded-xl max-w-sm w-full p-6 shadow-2xl">
@@ -1861,7 +2006,7 @@ export default function App() {
               <AlertCircle className="w-5 h-5 text-rose-500" /> Eliminar Evento Oficial
             </h3>
             <p className="text-xs text-slate-400 mb-6">
-              ¿Estás absolutamente seguro de que deseas eliminar permanentemente el evento <span className="text-cyan-400 font-bold">"{deleteEventTarget.nombre}"</span>? Esta acción es irreversible.
+              ¿Estás absolutamente seguro de que deseas eliminar permanentemente el evento <span className="text-cyan-400 font-bold">"{deleteEventTarget.nombre}"</span>? Esta acción no se puede deshacer.
             </p>
             <div className="flex gap-3 justify-end">
               <button 
@@ -1881,14 +2026,14 @@ export default function App() {
         </div>
       )}
 
-      {/* Footer */}
-      <footer className="bg-slate-900 border-t border-slate-800/60 py-8 mt-12">
+      {/* Pie de Página adaptable */}
+      <footer className="bg-slate-900 border-t border-slate-800/60 py-8 mt-12 transition-colors duration-300">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
           <p className="text-xs text-slate-500">
-            &copy; {new Date().getFullYear()} Llano Torneo Sport. Todos los derechos reservados.
+            &copy; {new Date().getFullYear()} Llano Torneo Sport & Llano Torneo Gaming. Todos los derechos reservados.
           </p>
           <p className="text-[10px] text-slate-600 mt-2">
-            Base de datos y eventos en tiempo real autoalimentados con persistencia permanente.
+            Base de datos y eventos en tiempo real unificados con persistencia en Google Cloud Firestore.
           </p>
         </div>
       </footer>

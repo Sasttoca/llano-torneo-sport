@@ -1912,7 +1912,6 @@ export default function App() {
                   autoFocus
                 />
                 {adminError && <p className="text-xs text-rose-400 mt-1 font-semibold">{adminError}</p>}
-                <p className="text-[10px] text-slate-500 mt-2">*(PIN por defecto: <span className="text-cyan-400 font-mono">admin</span> o <span className="text-cyan-400 font-mono">llanotorneos123</span>)</p>
               </div>
 
               <button 

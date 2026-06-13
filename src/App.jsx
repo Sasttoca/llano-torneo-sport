@@ -311,18 +311,40 @@ export default function App() {
         throw new Error("Conexión perdida. Reintentando...");
       }
 
-      const publicCollectionRef = collection(db, 'artifacts', appId, 'public', 'data', 'registrados');
+      const targetEvent = events.find(ev => ev.nombre === formData.evento);
+      if (!targetEvent) {
+        throw new Error("El evento seleccionado no es válido.");
+      }
+
+      // ✅ CAMBIO ARQUITECTÓNICO DE IDs INTUITIVOS EN FIREBASE
+      // Creamos un ID único que relaciona el Documento con el Evento
+      const docId = `${formData.documento.trim()}_${targetEvent.id}`;
+
+      // Colección de Registros (Inscripciones por evento) con ID estructurado
+      const registradosDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'registrados', docId);
       
+      // Colección Directiva Maestra de Participantes Globales Únicos por Cédula (ID = Documento)
+      const globalDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'registrados_globales', formData.documento.trim());
+
       const payload = {
         nombreCompleto: formData.nombreCompleto.trim(),
         documento: formData.documento.trim(),
         celular: formData.celular.trim(),
         correo: formData.correo.trim(),
         evento: formData.evento,
+        eventoId: targetEvent.id,
         fechaRegistro: Date.now()
       };
 
-      await addDoc(publicCollectionRef, payload);
+      // Guardar de forma atómica en ambas rutas de la nube
+      await setDoc(registradosDocRef, payload);
+      await setDoc(globalDocRef, {
+        nombreCompleto: formData.nombreCompleto.trim(),
+        documento: formData.documento.trim(),
+        celular: formData.celular.trim(),
+        correo: formData.correo.trim(),
+        ultimaActividad: Date.now()
+      });
       
       playBeep(880, 0.3);
       setFormStatus({ type: 'success', message: `¡Inscripción exitosa al evento "${formData.evento}"! Datos guardados de forma permanente.` });
@@ -363,8 +385,15 @@ export default function App() {
         setIsEditingEvent(false);
         setEditingEventId(null);
       } else {
-        // Creation logic
-        const docId = 'event-' + Date.now();
+        // ✅ GENERACIÓN DE SLUG LIMPIO Y LEGIBLE PARA EVENTOS EN FIREBASE
+        const slug = newEvent.nombre.trim().toLowerCase()
+          .normalize("NFD").replace(/[\u0300-\u036f]/g, "") // Quitar tildes
+          .replace(/[^a-z0-9]+/g, '-')                      // Reemplazar espacios/símbolos por guiones
+          .replace(/(^-|-$)+/g, '');                        // Quitar guiones iniciales o finales
+        
+        // Formamos el ID legible ej: evento-copa-futsal-llano-2026-4819
+        const docId = `evento-${slug}-${Date.now().toString().slice(-4)}`;
+        
         const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'eventos', docId);
         await setDoc(docRef, {
           nombre: newEvent.nombre.trim(),
@@ -799,7 +828,7 @@ export default function App() {
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-cyan-500 selection:text-slate-950">
       
-      { }
+      {/* Header */}
       <header className="sticky top-0 z-40 bg-slate-900/90 backdrop-blur-md border-b border-slate-800">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-20">
@@ -1020,7 +1049,6 @@ export default function App() {
         </div>
 
         {/* Tab 1: Registration Form */}
-        {}
         {activeTab === 'register' && (
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
             
@@ -1237,7 +1265,6 @@ export default function App() {
         )}
 
         {/* Tab 2: Admin Registered List (Filtered with Event Tabs) */}
-        {}
         {activeTab === 'admin-list' && isAdminAuthenticated && (
           <div className="bg-slate-900 rounded-2xl border border-slate-800 shadow-2xl overflow-hidden animate-fade-in">
             
@@ -1260,7 +1287,7 @@ export default function App() {
                 </button>
                 <button 
                   onClick={handleExportExcel}
-                  className="bg-gradient-to-r from-cyan-400 to-sky-500 hover:from-cyan-300 hover:to-sky-400 text-xs text-slate-950 font-black px-4 py-2.5 rounded-lg flex items-center gap-1.5 transition shadow-lg shadow-cyan-400/20"
+                  className="bg-gradient-to-r from-cyan-400 to-sky-500 hover:from-cyan-300 hover:to-sky-400 text-slate-950 font-black px-4 py-2.5 rounded-lg flex items-center gap-1.5 transition shadow-lg shadow-cyan-400/20"
                 >
                   <Trophy className="w-4 h-4 text-slate-950" /> Exportar a Excel (.xls)
                 </button>
@@ -1429,7 +1456,6 @@ export default function App() {
         )}
 
         {/* Tab 3: Sorteo / Live Interactive Roulette */}
-        {}
         {activeTab === 'roulette' && isAdminAuthenticated && (
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-stretch animate-fade-in">
             
@@ -1540,7 +1566,6 @@ export default function App() {
         )}
 
         {/* Tab 4: Event Creator & Management */}
-        {}
         {activeTab === 'manage-events' && isAdminAuthenticated && (
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start animate-fade-in">
             {/* Left side: Create/Edit Event Form */}
@@ -1640,7 +1665,7 @@ export default function App() {
                         </div>
                         <p className="text-xs text-slate-400 mt-1">{ev.descripcion}</p>
                         <span className="inline-block mt-2 text-[10px] font-mono text-slate-500">
-                          Creado: {ev.fechaCreado ? new Date(ev.fechaCreado).toLocaleDateString() : 'Por defecto'}
+                          ID: <span className="text-cyan-500">{ev.id}</span> | Creado: {ev.fechaCreado ? new Date(ev.fechaCreado).toLocaleDateString() : 'Por defecto'}
                         </span>
                       </div>
 
@@ -1686,7 +1711,6 @@ export default function App() {
         )}
       </main>
 
-      {}
       {/* MODAL 1: Admin Access Passkey Authentication */}
       {showPinModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4 animate-fade-in">

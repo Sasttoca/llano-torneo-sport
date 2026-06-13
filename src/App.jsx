@@ -12,7 +12,8 @@ import {
   doc, 
   deleteDoc, 
   onSnapshot,
-  setDoc
+  setDoc,
+  getDoc
 } from 'firebase/firestore';
 import { 
   Users, 
@@ -176,7 +177,6 @@ export default function App() {
 
     // RULE 1: STRICT PATH FOR PUBLIC DATA
     const eventsCollectionRef = collection(db, 'artifacts', appId, 'public', 'data', 'eventos');
-    const participantsCollectionRef = collection(db, 'artifacts', appId, 'public', 'data', 'registrados');
 
     // Sync Events
     const unsubscribeEvents = onSnapshot(
@@ -210,29 +210,36 @@ export default function App() {
       }
     );
 
-    // Sync Participants
-    const unsubscribeParticipants = onSnapshot(
-      participantsCollectionRef,
-      (snapshot) => {
-        const list = [];
-        snapshot.forEach((doc) => {
-          list.push({ id: doc.id, ...doc.data() });
-        });
-        // Sort inside JavaScript memory (RULE 2 compliance)
-        list.sort((a, b) => (b.fechaRegistro || 0) - (a.fechaRegistro || 0));
-        setParticipants(list);
-      },
-      (error) => {
-        console.error("Firestore participants sync error: ", error);
-        triggerNotification('error', 'Error al sincronizar participantes.');
-      }
-    );
+    // SECURITY OPTIMIZATION: Sync Participants ONLY if user is Authenticated Admin
+    let unsubscribeParticipants = () => {};
+    if (isAdminAuthenticated) {
+      const participantsCollectionRef = collection(db, 'artifacts', appId, 'public', 'data', 'registrados');
+      unsubscribeParticipants = onSnapshot(
+        participantsCollectionRef,
+        (snapshot) => {
+          const list = [];
+          snapshot.forEach((doc) => {
+            list.push({ id: doc.id, ...doc.data() });
+          });
+          // Sort inside JavaScript memory
+          list.sort((a, b) => (b.fechaRegistro || 0) - (a.fechaRegistro || 0));
+          setParticipants(list);
+        },
+        (error) => {
+          console.error("Firestore participants sync error: ", error);
+          triggerNotification('error', 'Error al sincronizar participantes.');
+        }
+      );
+    } else {
+      // Clear data state for normal users to protect memory and privacy
+      setParticipants([]);
+    }
 
     return () => {
       unsubscribeEvents();
       unsubscribeParticipants();
     };
-  }, [user]);
+  }, [user, isAdminAuthenticated]);
 
   // Automatically ensure the selected event in registration form is an active event
   useEffect(() => {
@@ -308,21 +315,7 @@ export default function App() {
       return;
     }
 
-    const isDuplicate = participants.some(p => 
-      (p.documento || '').trim().toLowerCase() === formData.documento.trim().toLowerCase() &&
-      p.evento === formData.evento
-    );
-
-    if (isDuplicate) {
-      setFormStatus({ 
-        type: 'error', 
-        message: `El participante con documento "${formData.documento}" ya está registrado en el evento "${formData.evento}". No se permiten duplicados.` 
-      });
-      playBeep(220, 0.4);
-      return;
-    }
-
-    setFormStatus({ type: 'loading', message: 'Guardando registro de forma segura...' });
+    setFormStatus({ type: 'loading', message: 'Verificando y guardando registro de forma segura...' });
 
     try {
       if (!user) {
@@ -337,6 +330,17 @@ export default function App() {
       const docId = `${formData.documento.trim()}_${targetEvent.id}`;
       const registradosDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'registrados', docId);
       const globalDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'registrados_globales', formData.documento.trim());
+
+      // SECURE PERFORMANCE OPTIMIZATION: Check for duplicate directly on Firestore by document reference (Only 1 read!)
+      const docSnap = await getDoc(registradosDocRef);
+      if (docSnap.exists()) {
+        setFormStatus({ 
+          type: 'error', 
+          message: `El participante con documento "${formData.documento}" ya está registrado en el evento "${formData.evento}". No se permiten duplicados.` 
+        });
+        playBeep(220, 0.4);
+        return;
+      }
 
       const payload = {
         nombreCompleto: formData.nombreCompleto.trim(),
@@ -378,7 +382,7 @@ export default function App() {
       setTimeout(() => setFormStatus({ type: '', message: '' }), 5000);
     } catch (error) {
       console.error("Error writing document: ", error);
-      setFormStatus({ type: 'error', message: 'Error de red. Tus datos no se borraron, intenta enviar nuevamente.' });
+      setFormStatus({ type: 'error', message: 'Error de red o de permisos. Intenta enviar nuevamente.' });
     }
   };
 
@@ -1034,9 +1038,15 @@ export default function App() {
             <span className="bg-slate-800 px-3 py-1.5 rounded-full text-slate-300">
               {events.length} Eventos Activos
             </span>
-            <span className="bg-cyan-950 text-cyan-400 border border-cyan-900 px-3 py-1.5 rounded-full">
-              {participants.length} Registrados Totales
-            </span>
+            {isAdminAuthenticated ? (
+              <span className="bg-cyan-950 text-cyan-400 border border-cyan-900 px-3 py-1.5 rounded-full animate-pulse">
+                {participants.length} Registrados Totales
+              </span>
+            ) : (
+              <span className="bg-cyan-950 text-cyan-400 border border-cyan-900 px-3 py-1.5 rounded-full">
+                Registro Habilitado
+              </span>
+            )}
           </div>
         </div>
 

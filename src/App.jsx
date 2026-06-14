@@ -111,7 +111,7 @@ const brandStyles = {
     hoverGradient: 'hover:from-cyan-300 hover:to-sky-400',
     shadowAccent: 'shadow-cyan-400/20',
     primaryRaw: '#22d3ee', // Cyan de referencia para la Ruleta en Canvas
-    logo: 'https://images.unsplash.com/photo-1508098682722-e99c43a406b2?auto=format&fit=crop&w=150&h=150&q=80', // Balón de Fútbol profesional
+    logo: 'logoSport.png', // Balón de Fútbol profesional
     title: 'Sport',
     titleColor: 'text-cyan-400',
     glowBg: 'bg-cyan-500/10',
@@ -133,7 +133,7 @@ const brandStyles = {
     hoverGradient: 'hover:from-red-400 hover:to-rose-500',
     shadowAccent: 'shadow-red-500/20',
     primaryRaw: '#ef4444', // Rojo de referencia para la Ruleta en Canvas
-    logo: 'https://images.unsplash.com/photo-1538481199705-c710c4e965fc?auto=format&fit=crop&w=150&h=150&q=80', // Consola de mandos de juego
+    logo: 'LogoGaming.png', // Consola de mandos de juego
     title: 'Gaming',
     titleColor: 'text-red-500',
     glowBg: 'bg-red-500/10',

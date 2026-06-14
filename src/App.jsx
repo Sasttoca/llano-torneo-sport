@@ -13,7 +13,8 @@ import {
   deleteDoc, 
   onSnapshot,
   setDoc,
-  getDoc
+  getDoc,
+  getDocs
 } from 'firebase/firestore';
 import { 
   Users, 
@@ -46,7 +47,8 @@ import {
   ChevronLeft,
   ChevronRight,
   ChevronsLeft,
-  ChevronsRight
+  ChevronsRight,
+  RefreshCw
 } from 'lucide-react';
 
 // Configuración de Firebase con tolerancia a entornos de prueba locales
@@ -173,10 +175,15 @@ export default function App() {
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
-  // --- NUEVOS ESTADOS PARA GESTIÓN DE SORTEO SIN REPETICIONES ---
+  // --- NUEVOS ESTADOS DE ARQUITECTURA BAJO DEMANDA (PULL) ---
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [lastSyncTime, setLastSyncTime] = useState(null);
+
+  // --- ESTADOS PARA GESTIÓN DE SORTEO PERSISTENTE EN LA NUBE ---
   const [sorteoActive, setSorteoActive] = useState(false);
   const [sorteoCandidates, setSorteoCandidates] = useState([]);
   const [sorteoWinners, setSorteoWinners] = useState([]);
+  const [isSyncingSorteo, setIsSyncingSorteo] = useState(false);
 
   // --- ESTADOS DE PAGINACIÓN OPTIMIZADA (CLIENT-SIDE) ---
   const [currentPage, setCurrentPage] = useState(1);
@@ -280,6 +287,7 @@ export default function App() {
     }, 100);
   };
 
+  // --- INICIALIZACIÓN DE FIREBASE Y AUTHENTICATION ---
   useEffect(() => {
     const initAuth = async () => {
       try {
@@ -301,104 +309,150 @@ export default function App() {
     return () => unsubscribeAuth();
   }, []);
 
-  // OPTIMIZACIÓN DE RED CRÍTICA: Sincronización selectiva y perezosa de la base de datos de inscritos
+  // --- ESCUCHA DE EVENTOS Y PATROCINADORES (REAL-TIME BAJA CONCURRENCIA) ---
   useEffect(() => {
-      if (!user) return;
+    if (!user) return;
 
-      const eventsCollectionRef = collection(db, 'artifacts', appId, 'public', 'data', 'eventos');
+    const eventsCollectionRef = collection(db, 'artifacts', appId, 'public', 'data', 'eventos');
 
-      const unsubscribeEvents = onSnapshot(
-        eventsCollectionRef,
-        async (snapshot) => {
-          let list = [];
-          snapshot.forEach((doc) => {
-            list.push({ id: doc.id, ...doc.data() });
-          });
+    const unsubscribeEvents = onSnapshot(
+      eventsCollectionRef,
+      async (snapshot) => {
+        let list = [];
+        snapshot.forEach((doc) => {
+          list.push({ id: doc.id, ...doc.data() });
+        });
 
-          if (list.length === 0) {
-            for (const item of DEFAULT_EVENTS) {
-              const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'eventos', item.id);
-              await setDoc(docRef, { 
-                nombre: item.nombre, 
-                descripcion: item.descripcion, 
-                fechaCreado: Date.now(), 
-                activo: true,
-                categoria: item.categoria
-              });
-            }
-          } else {
-            list.sort((a, b) => (b.fechaCreado || 0) - (a.fechaCreado || 0));
-            setEvents(list);
-            if (formData.evento === '' && list.length > 0) {
-              setFormData(prev => ({ ...prev, evento: list[0].nombre }));
-            }
-            if (selectedRouletteEvent === '' && list.length > 0) {
-              setSelectedRouletteEvent(list[0].nombre);
-            }
-          }
-        },
-        (error) => {
-          console.error("Firestore events sync error: ", error);
-        }
-      );
-
-      const sponsorsRef = collection(db, 'artifacts', appId, 'public', 'data', 'patrocinadores');
-      const unsubscribeSponsors = onSnapshot(
-        sponsorsRef,
-        async (snapshot) => {
-          const list = [];
-          snapshot.forEach((doc) => list.push({ id: doc.id, ...doc.data() }));
-          
-          if (list.length === 0) {
-            for (const item of DEFAULT_SPONSORS) {
-              const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'patrocinadores', item.id);
-              await setDoc(docRef, {
-                nombre: item.nombre,
-                enlace: item.enlace,
-                vinculacion: item.vinculacion || 'all',
-                eventosIds: item.eventosIds || [],
-                creadoEn: Date.now()
-              });
-            }
-          } else {
-            setSponsorsList(list);
-          }
-        },
-        (error) => console.error("Error al sincronizar patrocinadores: ", error)
-      );
-
-      // SOLO SE DESCARGA LA BASE DE DATOS DE REGISTRADOS CUANDO SE ESTÁ VIENDO EL PANEL O LA RULETA
-      let unsubscribeParticipants = () => {};
-      const needsParticipants = isAdminAuthenticated && (activeTab === 'admin-list' || activeTab === 'roulette');
-      
-      if (needsParticipants) {
-        const participantsCollectionRef = collection(db, 'artifacts', appId, 'public', 'data', 'registrados');
-        unsubscribeParticipants = onSnapshot(
-          participantsCollectionRef,
-          (snapshot) => {
-            const list = [];
-            snapshot.forEach((doc) => {
-              list.push({ id: doc.id, ...doc.data() });
+        if (list.length === 0) {
+          for (const item of DEFAULT_EVENTS) {
+            const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'eventos', item.id);
+            await setDoc(docRef, { 
+              nombre: item.nombre, 
+              descripcion: item.descripcion, 
+              fechaCreado: Date.now(), 
+              activo: true,
+              categoria: item.categoria
             });
-            list.sort((a, b) => (b.fechaRegistro || 0) - (a.fechaRegistro || 0));
-            setParticipants(list);
-          },
-          (error) => {
-            console.error("Firestore participants sync error: ", error);
-            triggerNotification('error', 'Error al sincronizar participantes.');
           }
-        );
-      } else {
-        // Liberar memoria RAM del cliente cuando no esté en pestañas administrativas pesadas
-        setParticipants([]);
+        } else {
+          list.sort((a, b) => (b.fechaCreado || 0) - (a.fechaCreado || 0));
+          setEvents(list);
+          if (formData.evento === '' && list.length > 0) {
+            setFormData(prev => ({ ...prev, evento: list[0].nombre }));
+          }
+          if (selectedRouletteEvent === '' && list.length > 0) {
+            setSelectedRouletteEvent(list[0].nombre);
+          }
+        }
+      },
+      (error) => {
+        console.error("Firestore events sync error: ", error);
       }
+    );
 
-      return () => {
-        unsubscribeEvents();
-        unsubscribeParticipants();
-        unsubscribeSponsors();
-      };
-    }, [user, isAdminAuthenticated, activeTab]);
+    const sponsorsRef = collection(db, 'artifacts', appId, 'public', 'data', 'patrocinadores');
+    const unsubscribeSponsors = onSnapshot(
+      sponsorsRef,
+      async (snapshot) => {
+        const list = [];
+        snapshot.forEach((doc) => list.push({ id: doc.id, ...doc.data() }));
+        
+        if (list.length === 0) {
+          for (const item of DEFAULT_SPONSORS) {
+            const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'patrocinadores', item.id);
+            await setDoc(docRef, {
+              nombre: item.nombre,
+              enlace: item.enlace,
+              vinculacion: item.vinculacion || 'all',
+              eventosIds: item.eventosIds || [],
+              creadoEn: Date.now()
+            });
+          }
+        } else {
+          setSponsorsList(list);
+        }
+      },
+      (error) => console.error("Error al sincronizar patrocinadores: ", error)
+    );
+
+    return () => {
+      unsubscribeEvents();
+      unsubscribeSponsors();
+    };
+  }, [user]);
+
+  // --- SOLUCIÓN MEJORA A: IMPLEMENTACIÓN DE FUNCIÓN DE SINCRONIZACIÓN BAJO DEMANDA (PULL) ---
+  const syncParticipants = async () => {
+    if (!user || !isAdminAuthenticated) return;
+    setIsSyncing(true);
+    try {
+      const participantsCollectionRef = collection(db, 'artifacts', appId, 'public', 'data', 'registrados');
+      const snapshot = await getDocs(participantsCollectionRef);
+      const list = [];
+      snapshot.forEach((doc) => {
+        list.push({ id: doc.id, ...doc.data() });
+      });
+      list.sort((a, b) => (b.fechaRegistro || 0) - (a.fechaRegistro || 0));
+      setParticipants(list);
+      setLastSyncTime(new Date());
+      triggerNotification('success', 'Participantes actualizados correctamente.');
+    } catch (error) {
+      console.error("Pull de Firestore falló: ", error);
+      triggerNotification('error', 'Error al consultar la base de datos de inscritos.');
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  // Pull automático cuando el administrador entra a una pestaña de consulta de datos por primera vez
+  useEffect(() => {
+    const needsSync = isAdminAuthenticated && (activeTab === 'admin-list' || activeTab === 'roulette');
+    if (needsSync && participants.length === 0 && !isSyncing) {
+      syncParticipants();
+    }
+  }, [activeTab, isAdminAuthenticated]);
+
+  // --- SOLUCIÓN MEJORA B: PERSISTENCIA DEL ESTADO DEL SORTEO EN FIRESTORE ---
+  const fetchSorteoProgreso = async () => {
+    if (!user || !selectedRouletteEvent || !isAdminAuthenticated) return;
+    setIsSyncingSorteo(true);
+    try {
+      const progressCollectionRef = collection(db, 'artifacts', appId, 'public', 'data', 'sorteo_progreso');
+      const snapshot = await getDocs(progressCollectionRef);
+      const allProgress = [];
+      snapshot.forEach((doc) => {
+        allProgress.push({ id: doc.id, ...doc.data() });
+      });
+
+      // Filtrado y ordenamiento en memoria (RULE 2: Sin queries complejas)
+      const filteredWinners = allProgress
+        .filter(w => w.evento === selectedRouletteEvent)
+        .sort((a, b) => (a.fechaGanado || 0) - (b.fechaGanado || 0));
+
+      setSorteoWinners(filteredWinners);
+
+      // Si ya existen ganadores guardados en la nube, autorestauramos la sesión sorteoActive en tarima
+      if (filteredWinners.length > 0) {
+        setSorteoActive(true);
+        const remaining = roulettePool.filter(p => !filteredWinners.some(w => w.id === p.id));
+        setSorteoCandidates(remaining);
+      } else if (sorteoActive) {
+        // Si no hay ganadores en la nube pero la UI está activa, reiniciamos el pool con el total actual
+        setSorteoCandidates([...roulettePool]);
+      }
+    } catch (err) {
+      console.error("Error cargando progreso del sorteo de Firestore: ", err);
+    } finally {
+      setIsSyncingSorteo(false);
+    }
+  };
+
+  // Sincronizar el progreso del sorteo cuando el administrador cambia de evento en la ruleta
+  useEffect(() => {
+    if (isAdminAuthenticated && activeTab === 'roulette' && selectedRouletteEvent) {
+      fetchSorteoProgreso();
+    }
+  }, [selectedRouletteEvent, activeTab, isAdminAuthenticated, participants]);
 
   useEffect(() => {
     const activeList = events.filter(ev => ev.activo !== false);
@@ -529,7 +583,7 @@ export default function App() {
       playBeep(880, 0.3);
       setFormStatus({ type: 'success', message: `¡Inscripción exitosa a "${formData.evento}"! Datos guardados.` });
       
-      // SOLUCIÓN AL PROBLEMA 1: Resetear el requisito de seguimiento para el siguiente registro
+      // Resetear el requisito de patrocinio obligatoriamente para soporte multiusuario en un mismo dispositivo
       setFollowedSponsors([]);
 
       setFormData(prev => ({
@@ -741,7 +795,7 @@ export default function App() {
       playBeep(300, 0.2);
       triggerNotification('success', 'Participante eliminado.');
       
-      // Si el participante eliminado estaba en la ruleta del sorteo activo, lo removemos también
+      // Eliminar también de las listas locales del sorteo si corresponde
       if (sorteoActive) {
         setSorteoCandidates(prev => prev.filter(p => p.id !== deleteTargetId));
         setSorteoWinners(prev => prev.filter(p => p.id !== deleteTargetId));
@@ -898,13 +952,13 @@ export default function App() {
   const [spinTime, setSpinTime] = useState(0);
   const [spinTimeTotal, setSpinTimeTotal] = useState(0);
 
-  // Pool general de participantes del evento de la ruleta
+  // Pool general de participantes del evento seleccionado
   const roulettePool = participants.filter(p => p.evento === selectedRouletteEvent);
 
-  // SOLUCIÓN AL PROBLEMA 2: Determinar qué pool dinámico usar para la ruleta
+  // Determinar qué pool se dibujará y sorteará en la ruleta (exclusión si el sorteo en la nube está activo)
   const activePoolForDraw = sorteoActive ? sorteoCandidates : roulettePool;
 
-  // Si supera los 50 inscritos cambia a modo "Sorteo de Alto Rendimiento" para optimizar el render
+  // Si supera los 50 inscritos cambia a modo "Sorteo de Alto Rendimiento"
   const isMassivePool = activePoolForDraw.length > 50;
 
   const drawRouletteWheel = () => {
@@ -941,7 +995,7 @@ export default function App() {
     const rouletteBrand = rouletteEventObj?.categoria === 'gaming' ? 'gaming' : 'sport';
     const activeBrandColorRaw = brandStyles[rouletteBrand]?.primaryRaw || '#22d3ee';
 
-    // Para evitar la saturación del canvas, limitamos visualmente el dibujo a un número de segmentos premium de alto rendimiento
+    // Limitar visualmente el dibujo a un número de segmentos premium de alto rendimiento
     const renderLength = isMassivePool ? 20 : activePoolForDraw.length;
     const arc = Math.PI / (renderLength / 2);
 
@@ -1021,7 +1075,7 @@ export default function App() {
 
   useEffect(() => {
     drawRouletteWheel();
-  }, [startAngle, participants, selectedRouletteEvent, events, sorteoActive, sorteoCandidates, roulettePool]);
+  }, [startAngle, participants, selectedRouletteEvent, events, sorteoActive, sorteoCandidates, activePoolForDraw]);
 
   // Actualizador veloz de nombres ciclando durante sorteos masivos
   useEffect(() => {
@@ -1031,15 +1085,15 @@ export default function App() {
       setCyclingName(activePoolForDraw[randomIndex].nombreCompleto);
     }, 60);
     return () => clearInterval(interval);
-  }, [isSpinning, isMassivePool, activePoolForDraw, roulettePool]);
+  }, [isSpinning, isMassivePool, activePoolForDraw]);
 
-  // Manejo del cambio de evento en la ruleta para reiniciar el sorteo activo si es necesario
+  // Manejo de cambio de evento en la ruleta
   useEffect(() => {
     if (sorteoActive) {
       setSorteoActive(false);
       setSorteoCandidates([]);
       setSorteoWinners([]);
-      triggerNotification('success', 'Evento cambiado. Sorteo restablecido al estado general.');
+      triggerNotification('success', 'Evento cambiado. Cargando sorteo asociado...');
     }
   }, [selectedRouletteEvent]);
 
@@ -1095,12 +1149,12 @@ export default function App() {
     playBeep(520, 0.2);
   };
 
-  const stopRotateWheel = () => {
+  const stopRotateWheel = async () => {
     setIsSpinning(false);
     const len = activePoolForDraw.length;
     if (len === 0) return;
 
-    // Sorteo matemático de alta precisión inmune al lag visual del Canvas
+    // Sorteo matemático de alta precisión
     const winningIndex = Math.floor(Math.random() * len);
     const chosenWinner = activePoolForDraw[winningIndex];
     
@@ -1110,14 +1164,44 @@ export default function App() {
     playConfettiBeeps();
     setCyclingName('');
 
-    // SOLUCIÓN AL PROBLEMA 2: Eliminar participante de la ruleta y mandarlo al bombo de ganadores
+    // --- MEJORA B: PERSISTENCIA DEL GANADOR EN FIRESTORE EN TIEMPO REAL ---
     if (sorteoActive) {
-      setSorteoWinners(prev => [...prev, chosenWinner]);
-      setSorteoCandidates(prev => prev.filter(p => p.id !== chosenWinner.id));
+      try {
+        const progressDocId = `winner_${chosenWinner.id}_${Date.now()}`;
+        const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'sorteo_progreso', progressDocId);
+        
+        const progressPayload = {
+          id: chosenWinner.id,
+          nombreCompleto: chosenWinner.nombreCompleto,
+          documento: chosenWinner.documento || '',
+          evento: selectedRouletteEvent,
+          fechaGanado: Date.now()
+        };
+
+        await setDoc(docRef, progressPayload);
+
+        // Actualizar estados reactivos locales al completarse con éxito en la nube
+        setSorteoWinners(prev => [...prev, progressPayload]);
+        setSorteoCandidates(prev => prev.filter(p => p.id !== chosenWinner.id));
+        triggerNotification('success', `${chosenWinner.nombreCompleto} ha sido guardado permanentemente como ganador.`);
+      } catch (err) {
+        console.error("Error al persistir ganador: ", err);
+        triggerNotification('error', 'Ganador seleccionado pero con fallas de persistencia de red.');
+        
+        // Fallback local por seguridad ante micro-cortes de red
+        setSorteoWinners(prev => [...prev, {
+          id: chosenWinner.id,
+          nombreCompleto: chosenWinner.nombreCompleto,
+          documento: chosenWinner.documento || '',
+          evento: selectedRouletteEvent,
+          fechaGanado: Date.now()
+        }]);
+        setSorteoCandidates(prev => prev.filter(p => p.id !== chosenWinner.id));
+      }
     }
   };
 
-  // CONTROLADORES PARA GESTIÓN DEL FLUJO DEL SORTEO DE 12 CUPOS
+  // --- CONTROLADORES PARA GESTIÓN DEL FLUJO DEL SORTEO PERSISTENTE ---
   const handleStartSorteoSession = () => {
     if (roulettePool.length === 0) {
       triggerNotification('error', 'No hay personas registradas en este evento para iniciar un sorteo.');
@@ -1127,15 +1211,45 @@ export default function App() {
     setSorteoWinners([]);
     setSorteoActive(true);
     playBeep(880, 0.35);
-    triggerNotification('success', 'Sesión de Sorteo Activada. Los ganadores no se repetirán.');
+    triggerNotification('success', 'Sesión de Sorteo Activada. Ganadores sincronizados con la nube.');
   };
 
-  const handleFinishSorteoSession = () => {
-    setSorteoActive(false);
-    setSorteoCandidates([]);
-    setSorteoWinners([]);
-    playBeep(440, 0.25);
-    triggerNotification('success', 'Sesión de Sorteo terminada. Se han reintegrado todos los ganadores al bombo general.');
+  const handleFinishSorteoSession = async () => {
+    if (!user || !selectedRouletteEvent) return;
+    setIsSyncingSorteo(true);
+    try {
+      // Descargamos todo el progreso para identificar qué borrar (RULE 2: Sin queries complejas)
+      const progressCollectionRef = collection(db, 'artifacts', appId, 'public', 'data', 'sorteo_progreso');
+      const snapshot = await getDocs(progressCollectionRef);
+      
+      const deletePromises = [];
+      snapshot.forEach((progressDoc) => {
+        const data = progressDoc.data();
+        if (data.evento === selectedRouletteEvent) {
+          const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'sorteo_progreso', progressDoc.id);
+          deletePromises.push(deleteDoc(docRef));
+        }
+      });
+
+      await Promise.all(deletePromises);
+
+      // Limpiamos estados locales
+      setSorteoActive(false);
+      setSorteoCandidates([]);
+      setSorteoWinners([]);
+      playBeep(440, 0.25);
+      triggerNotification('success', 'Sorteo finalizado. Base de datos de progreso limpia y candidatos reintegrados.');
+    } catch (error) {
+      console.error("Error al borrar progreso en Firestore: ", error);
+      triggerNotification('error', 'Error al reiniciar progreso en la nube.');
+      
+      // Reinicio local para no bloquear el evento
+      setSorteoActive(false);
+      setSorteoCandidates([]);
+      setSorteoWinners([]);
+    } finally {
+      setIsSyncingSorteo(false);
+    }
   };
 
   const handleImageError = (e) => {
@@ -1168,7 +1282,7 @@ export default function App() {
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans transition-all duration-500 selection:bg-slate-100 selection:text-slate-950">
       
-      {/* Header adaptable - Con espaciado estético, menú compacto y destacados iconos grandes */}
+      {/* Header adaptable */}
       <header className="sticky top-0 z-40 bg-slate-900/95 backdrop-blur-md border-b border-slate-800 transition-colors duration-300">
         <div className="max-w-7xl mx-auto px-6 sm:px-8">
           <div className="flex items-center justify-between h-20">
@@ -1268,7 +1382,8 @@ export default function App() {
               </button>
 
               {isAdminAuthenticated ? (
-                <div className={`hidden sm:flex items-center gap-2 px-4 py-2 rounded-full text-xs font-bold border transition-colors text-white ${activeBrand === 'sport' ? 'bg-cyan-600 border-cyan-500' : 'bg-red-600 border-red-500'}`}>
+                // Ajuste solicitado: Fondo dinámico y texto blanco con punto de pulso blanco
+                <div className={`hidden sm:flex items-center gap-2 px-4 py-2 rounded-full text-xs font-bold border transition-colors ${activeBrand === 'sport' ? 'bg-cyan-600 text-white border-cyan-500' : 'bg-red-600 text-white border-red-500'}`}>
                   <span className="w-2 h-2 rounded-full animate-pulse bg-white"></span>
                   Admin Activado
                 </div>
@@ -1350,8 +1465,8 @@ export default function App() {
             
             <div className="pt-2 border-t border-slate-800/60">
               {isAdminAuthenticated ? (
-                <div className={`flex items-center gap-2 px-4 py-2 text-xs font-bold ${activeBrandStyles.textAccent}`}>
-                  <span className={`w-2.5 h-2.5 rounded-full animate-pulse ${activeBrand === 'sport' ? 'bg-cyan-400' : 'bg-red-500'}`}></span>
+                <div className="flex items-center gap-2 px-4 py-2 text-xs font-bold text-white">
+                  <span className="w-2.5 h-2.5 rounded-full animate-pulse bg-white"></span>
                   Sesión Admin Activa
                 </div>
               ) : (
@@ -1395,14 +1510,14 @@ export default function App() {
                 <span className={`relative inline-flex rounded-full h-3.5 w-3.5 ${activeBrand === 'sport' ? 'bg-cyan-500' : 'bg-red-500'}`}></span>
               </span>
               <p className="text-sm font-semibold text-slate-300">
-                Servidor Seguro de Llano Torneo Sport & Gaming Sincronizado en la Nube
+                Sincronización Avanzada bajo Demanda y Respaldos del Sorteo en la Nube
               </p>
             </div>
             <div className="flex gap-2 text-xs font-semibold">
               <span className="bg-slate-800 px-3 py-1.5 rounded-full text-slate-300">
                 {events.length} Eventos Activos
               </span>
-              <span className={`border px-3 py-1.5 rounded-full animate-pulse ${activeBrand === 'sport' ? 'bg-cyan-950 text-cyan-400 border-cyan-900' : 'bg-red-950 text-red-500 border-red-900'}`}>
+              <span className={`border px-3 py-1.5 rounded-full ${activeBrand === 'sport' ? 'bg-cyan-950 text-cyan-400 border-cyan-900' : 'bg-red-950 text-red-500 border-red-900'}`}>
                 {participants.length} Registrados Totales
               </span>
             </div>
@@ -1704,7 +1819,7 @@ export default function App() {
                   <Users className={`w-5 h-5 ${activeBrandStyles.textAccent}`} />
                   CONTROL DE PARTICIPANTES MULTI-EVENTO
                 </h3>
-                <p className="text-xs text-slate-400">Base de datos de inscritos estructurada con paginación de alta velocidad.</p>
+                <p className="text-xs text-slate-400">Base de datos de inscritos estructurada de forma segura bajo demanda.</p>
               </div>
 
               {/* Descarga de CSV y Excel */}
@@ -1720,6 +1835,32 @@ export default function App() {
                   className={`bg-gradient-to-r text-slate-950 font-black px-4 py-2.5 rounded-lg flex items-center gap-1.5 transition shadow-lg ${activeBrandStyles.gradient} ${activeBrandStyles.hoverGradient} ${activeBrandStyles.shadowAccent}`}
                 >
                   <Trophy className="w-4 h-4 text-slate-950" /> Exportar a Excel (.xls)
+                </button>
+              </div>
+            </div>
+
+            {/* BARRA DE ACCESO BAJO DEMANDA (Pull Architecture) */}
+            <div className="bg-slate-950/80 p-4 border-b border-slate-800/80 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <RefreshCw className={`w-4.5 h-4.5 text-emerald-400 ${isSyncing ? 'animate-spin' : ''}`} />
+                <div>
+                  <span className="text-xs font-bold text-white block">Sincronización Manual (Ahorro de Servidor)</span>
+                  <span className="text-[10px] text-slate-400 block">Descarga de forma segura y puntual las últimas inscripciones de Firestore.</span>
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
+                {lastSyncTime && (
+                  <span className="text-[11px] font-mono text-slate-400 bg-slate-900 px-2.5 py-1 rounded border border-slate-850">
+                    Último Pull: {lastSyncTime.toLocaleTimeString()}
+                  </span>
+                )}
+                <button
+                  type="button"
+                  disabled={isSyncing}
+                  onClick={syncParticipants}
+                  className={`px-4 py-2 rounded-lg text-xs font-black uppercase tracking-wider text-slate-950 transition-all duration-200 disabled:opacity-50 ${activeBrandStyles.bgAccent} hover:scale-[1.02]`}
+                >
+                  {isSyncing ? 'Actualizando...' : '🔄 Sincronizar Ahora'}
                 </button>
               </div>
             </div>
@@ -1898,7 +2039,7 @@ export default function App() {
               </table>
             </div>
 
-            {/* CONTROLES DE PAGINACIÓN DE ALTO RENDIMIENTO */}
+            {/* CONTROLES DE PAGINACIÓN */}
             {filteredParticipants.length > 0 && (
               <div className="p-4 bg-slate-950/40 border-t border-slate-800 flex flex-col sm:flex-row gap-4 justify-between items-center text-xs text-slate-400">
                 <div>
@@ -1968,7 +2109,7 @@ export default function App() {
                     <span className="text-[10px] bg-amber-500 text-slate-950 px-2 py-0.5 rounded font-bold animate-pulse font-sans">MODO RENDIMIENTO</span>
                   )}
                   {sorteoActive && (
-                    <span className="text-[10px] bg-emerald-500 text-slate-950 px-2 py-0.5 rounded font-black tracking-wider animate-pulse font-sans">SESIÓN SORTEO ACTIVA</span>
+                    <span className="text-[10px] bg-emerald-500 text-slate-950 px-2 py-0.5 rounded font-black tracking-wider animate-pulse font-sans">SORTEO EN LA NUBE</span>
                   )}
                 </h3>
                 
@@ -1996,6 +2137,19 @@ export default function App() {
                 </div>
               </div>
 
+              {/* Botón rápido para Sincronizar en Ruleta */}
+              <div className="flex gap-2 items-center bg-slate-950/40 p-2.5 rounded-lg border border-slate-850 text-xs w-full max-w-sm justify-between">
+                <span className="text-slate-400">¿Inscritos desactualizados?</span>
+                <button
+                  onClick={syncParticipants}
+                  disabled={isSyncing}
+                  className="bg-slate-800 hover:bg-slate-700 text-white font-bold px-3 py-1.5 rounded text-[10px] uppercase transition flex items-center gap-1"
+                >
+                  <RefreshCw className={`w-3 h-3 ${isSyncing ? 'animate-spin' : ''}`} />
+                  {isSyncing ? 'Sincronizando...' : 'Actualizar'}
+                </button>
+              </div>
+
               {/* Contenedor del Canvas de la Ruleta */}
               <div className="relative my-4 flex flex-col items-center justify-center">
                 {/* Flecha indicadora adaptable */}
@@ -2010,7 +2164,7 @@ export default function App() {
                   className="max-w-full h-auto aspect-square rounded-full shadow-2xl bg-slate-950 border border-slate-800 mt-8"
                 />
 
-                {/* MODAL / VISOR DE NOMBRE PARA SORTEOS MASIVOS (Evita laguear el render) */}
+                {/* MODAL / VISOR DE NOMBRE PARA SORTEOS MASIVOS */}
                 {isMassivePool && (
                   <div className="mt-6 w-full max-w-sm bg-slate-950/80 border border-slate-800 rounded-xl p-4 text-center shadow-inner">
                     <span className="text-[10px] font-bold text-slate-500 tracking-widest block uppercase mb-1">Ciclador de Participantes</span>
@@ -2046,7 +2200,7 @@ export default function App() {
               </div>
             </div>
 
-            {/* SOLUCIÓN AL PROBLEMA 2: Sidebar de Bombo de Participantes / Bombo de Ganadores */}
+            {/* Sidebar de Bombo de Participantes / Bombo de Ganadores en Nube */}
             <div className="lg:col-span-5 bg-slate-900 rounded-2xl border border-slate-800 p-6 flex flex-col justify-between shadow-2xl">
               <div>
                 {sorteoActive ? (
@@ -2056,27 +2210,23 @@ export default function App() {
                       <div className="flex items-center justify-between">
                         <h4 className="font-black text-white uppercase tracking-wider text-sm flex items-center gap-2">
                           <Award className={`w-4.5 h-4.5 ${activeBrandStyles.textAccent}`} />
-                          Sorteo en Progreso
+                          Sorteo Acumulativo
                         </h4>
                         <span className="bg-emerald-500 text-slate-950 text-[10px] font-black uppercase tracking-wider px-2.5 py-0.5 rounded-full animate-pulse">
-                          Exclusivo
+                          Auto-Guardado
                         </span>
                       </div>
                       
-                      {/* Barra de progreso de cupos removida y optimizada a libre acumulación */}
-                      <div className="mt-3">
-                        <div className="flex justify-between text-xs font-bold text-slate-300">
-                          <span>Ganadores Elegidos:</span>
-                          <span className={activeBrandStyles.textAccent}>{sorteoWinners.length} Participantes</span>
-                        </div>
-                      </div>
+                      {/* Indicador de estado del sorteo */}
+                      <p className="text-xs text-slate-400 mt-2">
+                        Los ganadores se están persistiendo de forma segura en Google Cloud. Puedes salir o recargar la página y tu sorteo se mantendrá intacto.
+                      </p>
                     </div>
 
                     {/* BOMBO DE GANADORES SELECCIONADOS */}
                     <div>
-                      {}
                       <span className="text-[10px] font-black tracking-widest text-amber-400 uppercase flex items-center gap-1.5 mb-2.5">
-                        🏆 BOMBO DE GANADORES ({sorteoWinners.length})
+                        🏆 GANADORES REGISTRADOS ({sorteoWinners.length})
                       </span>
                       <div className="space-y-2 max-h-[170px] overflow-y-auto pr-1">
                         {sorteoWinners.length > 0 ? (
@@ -2087,7 +2237,7 @@ export default function App() {
                             >
                               <div className="font-black text-amber-200 flex items-center gap-2">
                                 <span className="bg-amber-500 text-slate-950 font-black px-1.5 py-0.5 rounded text-[9px] uppercase">
-                                  CUPÓN #{idx + 1}
+                                  GANADOR #{idx + 1}
                                 </span>
                                 {winner.nombreCompleto}
                               </div>
@@ -2098,7 +2248,7 @@ export default function App() {
                           ))
                         ) : (
                           <div className="text-center py-6 text-slate-600 text-xs border border-dashed border-slate-800 rounded-xl">
-                            Aún no hay ganadores. ¡Gira la ruleta en directo!
+                            Aún no hay ganadores. ¡Gira la ruleta para elegir al primero!
                           </div>
                         )}
                       </div>
@@ -2107,7 +2257,7 @@ export default function App() {
                     {/* CANDIDATOS RESTANTES EN LA RULETA */}
                     <div className="pt-4 border-t border-slate-800/60">
                       <span className="text-[10px] font-black tracking-widest text-slate-400 uppercase block mb-2">
-                        👥 CANDIDATOS RESTANTES ({sorteoCandidates.length})
+                        👥 CANDIDATOS EN COLA ({sorteoCandidates.length})
                       </span>
                       <div className="space-y-1.5 max-h-[140px] overflow-y-auto pr-1">
                         {sorteoCandidates.map((p, idx) => (
@@ -2134,19 +2284,19 @@ export default function App() {
                       Solo las personas registradas en el torneo seleccionado ingresarán al sorteo dinámico actual.
                     </p>
 
-                    {/* Botón de Llamado a la Acción para iniciar sorteo */}
+                    {/* Botón de Llamado a la Acción para iniciar sorteo persistente */}
                     <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-4 text-center my-4 animate-fade-in">
                       <Sparkles className={`w-8 h-8 mx-auto mb-2 ${activeBrandStyles.textAccent} animate-pulse`} />
-                      <h5 className="text-xs font-black text-white uppercase tracking-wider">Modo Sorteo Especial sin Repeticiones</h5>
+                      <h5 className="text-xs font-black text-white uppercase tracking-wider">Sorteo con Respaldo en la Nube</h5>
                       <p className="text-[11px] text-slate-400 mt-1 mb-3.5 leading-normal">
-                        Cada participante ganador se retira de la ruleta automáticamente para evitar repeticiones. Al finalizar se pueden reintegrar.
+                        Cada ganador se guardará automáticamente en Firestore. El sistema los descartará del bombo para que no salgan repetidos.
                       </p>
                       <button
                         type="button"
                         onClick={handleStartSorteoSession}
                         className={`w-full py-2.5 rounded-lg text-xs font-black uppercase tracking-wider text-slate-950 bg-gradient-to-r ${activeBrandStyles.gradient} ${activeBrandStyles.hoverGradient} shadow-md transition-all duration-300 hover:scale-[1.01]`}
                       >
-                        🚀 Iniciar Sorteo Especial
+                        🚀 Activar Sorteo Persistente
                       </button>
                     </div>
 
@@ -2178,14 +2328,15 @@ export default function App() {
                 {sorteoActive ? (
                   <div className="space-y-2">
                     <p className="text-[10px] text-slate-400 leading-normal mb-2">
-                      Al finalizar, los ganadores serán liberados del bombo de exclusión de esta sesión del navegador.
+                      Al finalizar y resetear el sorteo, la colección especial de ganadores en la nube se limpiará por completo para este evento.
                     </p>
                     <button
                       type="button"
+                      disabled={isSyncingSorteo}
                       onClick={handleFinishSorteoSession}
-                      className="w-full bg-rose-950/40 hover:bg-rose-900/50 border border-rose-900/50 text-rose-400 font-bold text-xs py-2.5 rounded-lg uppercase tracking-wider transition duration-300"
+                      className="w-full bg-rose-950/40 hover:bg-rose-900/50 border border-rose-900/50 text-rose-400 font-bold text-xs py-2.5 rounded-lg uppercase tracking-wider transition duration-300 disabled:opacity-50"
                     >
-                      🛑 Finalizar y Resetear Sorteo
+                      {isSyncingSorteo ? 'Procesando en la Nube...' : '🛑 Finalizar y Resetear Sorteo'}
                     </button>
                   </div>
                 ) : (

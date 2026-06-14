@@ -45,6 +45,7 @@ import {
   Gamepad2
 } from 'lucide-react';
 
+// Configuración de Firebase con tolerancia a entornos de prueba locales
 const firebaseConfig = typeof __firebase_config !== 'undefined' 
   ? JSON.parse(__firebase_config) 
   : {
@@ -67,6 +68,13 @@ const DEFAULT_EVENTS = [
   { id: 'default-2', nombre: 'Gran Sorteo Integración Deportiva', descripcion: 'Sorteo especial del torneo de integración de fútbol.', activo: true, categoria: 'sport' },
   { id: 'default-3', nombre: 'Gran Campeonato EA Sports FC 26 - Llano Gaming', descripcion: 'Torneo virtual de fútbol para la consola de nueva generación.', activo: true, categoria: 'gaming' },
   { id: 'default-4', nombre: 'Rifa de Clausura de Torneos Gaming', descripcion: 'Evento de cierre con increíbles premios para apasionados del gaming.', activo: true, categoria: 'gaming' }
+];
+
+// Patrocinadores predeterminados para evitar bloqueos del sponsor-gate al iniciar por primera vez
+const DEFAULT_SPONSORS = [
+  { id: 'default-sponsor-1', nombre: 'Gatorade Meta', enlace: 'https://gatorade.com', vinculacion: 'all', eventosIds: [] },
+  { id: 'default-sponsor-2', nombre: 'Llanero Gaming Store', enlace: 'https://instagram.com', vinculacion: 'all', eventosIds: [] },
+  { id: 'default-sponsor-3', nombre: 'Indeportes Meta', enlace: 'https://www.meta.gov.co', vinculacion: 'all', eventosIds: [] }
 ];
 
 // Helper para sanitizar strings en el Excel corporativo
@@ -98,7 +106,8 @@ const brandStyles = {
     gradient: 'from-cyan-400 to-sky-500',
     hoverGradient: 'hover:from-cyan-300 hover:to-sky-400',
     shadowAccent: 'shadow-cyan-400/20',
-    logo: '/logoSport.png', // Logo de llanero con trofeo (Ruta absoluta)
+    primaryRaw: '#22d3ee', // Cyan de referencia para la Ruleta en Canvas
+    logo: 'logoSport.png', // Balón de Fútbol profesional
     title: 'Sport',
     titleColor: 'text-cyan-400',
     glowBg: 'bg-cyan-500/10',
@@ -119,7 +128,8 @@ const brandStyles = {
     gradient: 'from-red-500 to-rose-600',
     hoverGradient: 'hover:from-red-400 hover:to-rose-500',
     shadowAccent: 'shadow-red-500/20',
-    logo: '/LogoGaming.png', // Logo urbano de control gaming (Ruta absoluta)
+    primaryRaw: '#ef4444', // Rojo de referencia para la Ruleta en Canvas
+    logo: 'LogoGaming.png', // Consola de mandos de juego
     title: 'Gaming',
     titleColor: 'text-red-500',
     glowBg: 'bg-red-500/10',
@@ -135,22 +145,18 @@ export default function App() {
   const [followedSponsors, setFollowedSponsors] = useState([]);
   const [sponsorsList, setSponsorsList] = useState([]); 
   
-  // Estado para el administrador (Solo Nombre y Enlace)
-  const [newSponsor, setNewSponsor] = useState({ nombre: '', enlace: '' });
+  // Estado para el administrador (Nombre, Enlace, Tipo de Vinculación y Eventos Asociados)
+  const [newSponsor, setNewSponsor] = useState({ 
+    nombre: '', 
+    enlace: '', 
+    vinculacion: 'all', // 'all' (Global) o 'custom' (Específico)
+    eventosIds: [] // Array de IDs de eventos vinculados
+  });
   const [isEditingSponsor, setIsEditingSponsor] = useState(false);
   const [editingSponsorId, setEditingSponsorId] = useState(null);
 
-  const allSponsorsFollowed = sponsorsList.length > 0 && followedSponsors.length === sponsorsList.length;
-
-  const handleFollowClick = (id, url) => {
-    window.open(url, '_blank', 'noopener,noreferrer');
-    if (!followedSponsors.includes(id)) {
-      setFollowedSponsors(prev => [...prev, id]);
-    }
-  };
-
   const [user, setUser] = useState(null);
-  const [activeTab, setActiveTab] = useState('register'); // 'register', 'admin-list', 'roulette', 'manage-events'
+  const [activeTab, setActiveTab] = useState('register'); // 'register', 'admin-list', 'roulette', 'manage-events', 'sponsors'
   const [participants, setParticipants] = useState([]);
   const [events, setEvents] = useState([]);
   const [selectedAdminEvent, setSelectedAdminEvent] = useState('all');
@@ -181,11 +187,12 @@ export default function App() {
   });
   const [formStatus, setFormStatus] = useState({ type: '', message: '' });
 
-  // Estados de modals y notificaciones
+  // Estados de modals y notificaciones de eliminación
   const [notification, setNotification] = useState(null);
   const [deleteTargetId, setDeleteTargetId] = useState(null);
   const [deleteTargetName, setDeleteTargetName] = useState('');
   const [deleteEventTarget, setDeleteEventTarget] = useState(null); 
+  const [deleteSponsorTarget, setDeleteSponsorTarget] = useState(null); // Nuevo Modal para Borrar Sponsor
   const [showWinnerModal, setShowWinnerModal] = useState(false);
   const [winnerName, setWinnerName] = useState('');
   const [winnerDoc, setWinnerDoc] = useState(''); 
@@ -205,7 +212,29 @@ export default function App() {
   } else if (activeTab === 'admin-list') {
     activeBrand = selectedAdminEvent === 'all' ? 'sport' : getEventBrand(selectedAdminEvent);
   }
-  const activeBrandStyles = brandStyles[activeBrand];
+  const activeBrandStyles = brandStyles[activeBrand] || brandStyles.sport;
+
+  // Filtrar patrocinadores válidos según el evento elegido en el formulario de registro
+  const currentRegEvent = events.find(ev => ev.nombre === formData.evento);
+  const currentRegEventId = currentRegEvent?.id;
+  const filteredSponsorsForRegister = sponsorsList.filter(sponsor => {
+    if (!sponsor.vinculacion || sponsor.vinculacion === 'all') return true;
+    if (sponsor.vinculacion === 'custom' && sponsor.eventosIds && sponsor.eventosIds.includes(currentRegEventId)) return true;
+    // Retrocompatibilidad por si existe el campo simple eventoId
+    if (sponsor.eventoId === currentRegEventId) return true;
+    return false;
+  });
+
+  // Habilitar si ya siguió todos los patrocinadores vinculados al evento actual
+  const allSponsorsFollowed = filteredSponsorsForRegister.length === 0 || 
+    filteredSponsorsForRegister.every(sponsor => followedSponsors.includes(sponsor.id));
+
+  const handleFollowClick = (id, url) => {
+    window.open(url, '_blank', 'noopener,noreferrer');
+    if (!followedSponsors.includes(id)) {
+      setFollowedSponsors(prev => [...prev, id]);
+    }
+  };
 
   const playBeep = (freq, duration) => {
     if (!soundEnabled) return;
@@ -298,18 +327,32 @@ export default function App() {
         }
       );
 
-      // --- NUEVO: SINCRONIZACIÓN DE PATROCINADORES ---
+      // --- SINCRONIZACIÓN DE PATROCINADORES ---
       const sponsorsRef = collection(db, 'artifacts', appId, 'public', 'data', 'patrocinadores');
       const unsubscribeSponsors = onSnapshot(
         sponsorsRef,
-        (snapshot) => {
+        async (snapshot) => {
           const list = [];
           snapshot.forEach((doc) => list.push({ id: doc.id, ...doc.data() }));
-          setSponsorsList(list);
+          
+          if (list.length === 0) {
+            // Inicializar patrocinadores de muestra si no existen
+            for (const item of DEFAULT_SPONSORS) {
+              const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'patrocinadores', item.id);
+              await setDoc(docRef, {
+                nombre: item.nombre,
+                enlace: item.enlace,
+                vinculacion: item.vinculacion || 'all',
+                eventosIds: item.eventosIds || [],
+                creadoEn: Date.now()
+              });
+            }
+          } else {
+            setSponsorsList(list);
+          }
         },
         (error) => console.error("Error al sincronizar patrocinadores: ", error)
       );
-      // -----------------------------------------------
 
       let unsubscribeParticipants = () => {};
       if (isAdminAuthenticated) {
@@ -333,11 +376,10 @@ export default function App() {
         setParticipants([]);
       }
 
-      // LIMPIEZA DE MEMORIA AL CERRAR
       return () => {
         unsubscribeEvents();
         unsubscribeParticipants();
-        unsubscribeSponsors(); // Agregamos la limpieza de los patrocinadores aquí
+        unsubscribeSponsors();
       };
     }, [user, isAdminAuthenticated]);
 
@@ -434,7 +476,6 @@ export default function App() {
       const registradosDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'registrados', docId);
       const globalDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'registrados_globales', formData.documento.trim());
 
-      // OPTIMIZACIÓN DE CONSUMO: Consulta de 1 lectura para validar duplicado
       const docSnap = await getDoc(registradosDocRef);
       if (docSnap.exists()) {
         setFormStatus({ 
@@ -538,23 +579,33 @@ export default function App() {
       triggerNotification('error', 'Debes completar el nombre y el enlace.');
       return;
     }
+    if (newSponsor.vinculacion === 'custom' && (!newSponsor.eventosIds || newSponsor.eventosIds.length === 0)) {
+      triggerNotification('error', 'Debes seleccionar al menos un evento para la vinculación específica.');
+      return;
+    }
 
     try {
+      const payload = {
+        nombre: newSponsor.nombre.trim(),
+        enlace: newSponsor.enlace.trim(),
+        vinculacion: newSponsor.vinculacion,
+        eventosIds: newSponsor.vinculacion === 'all' ? [] : newSponsor.eventosIds,
+        actualizadoEn: Date.now()
+      };
+
       if (isEditingSponsor && editingSponsorId) {
-        // Editar existente
         const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'patrocinadores', editingSponsorId);
-        await setDoc(docRef, { ...newSponsor, actualizadoEn: Date.now() }, { merge: true });
-        triggerNotification('success', 'Patrocinador actualizado.');
+        await setDoc(docRef, payload, { merge: true });
+        triggerNotification('success', 'Patrocinador actualizado correctamente.');
       } else {
-        // Crear nuevo
         const docId = `sponsor-${Date.now()}`;
         const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'patrocinadores', docId);
-        await setDoc(docRef, { ...newSponsor, creadoEn: Date.now() });
-        triggerNotification('success', 'Nuevo patrocinador añadido.');
+        payload.creadoEn = Date.now();
+        await setDoc(docRef, payload);
+        triggerNotification('success', 'Nuevo patrocinador añadido con éxito.');
       }
       
-      // Limpiar formulario después de guardar
-      setNewSponsor({ nombre: '', enlace: '' });
+      setNewSponsor({ nombre: '', enlace: '', vinculacion: 'all', eventosIds: [] });
       setIsEditingSponsor(false);
       setEditingSponsorId(null);
     } catch (error) {
@@ -566,7 +617,7 @@ export default function App() {
   const handleDeleteSponsor = async (id) => {
     try {
       await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'patrocinadores', id));
-      triggerNotification('success', 'Patrocinador eliminado.');
+      triggerNotification('success', 'Patrocinador eliminado permanentemente.');
     } catch (error) {
       console.error("Error eliminando patrocinador: ", error);
       triggerNotification('error', 'No se pudo eliminar el patrocinador.');
@@ -576,9 +627,13 @@ export default function App() {
   const handleEditSponsor = (sponsor) => {
     setIsEditingSponsor(true);
     setEditingSponsorId(sponsor.id);
-    setNewSponsor({ nombre: sponsor.nombre, enlace: sponsor.enlace });
+    setNewSponsor({ 
+      nombre: sponsor.nombre, 
+      enlace: sponsor.enlace,
+      vinculacion: sponsor.vinculacion || 'all',
+      eventosIds: sponsor.eventosIds || []
+    });
   };
-  // ----------------------------------------
 
   const handleToggleEventActive = async (eventId, currentStatus) => {
     try {
@@ -631,7 +686,8 @@ export default function App() {
 
   const handleAdminAuth = (e) => {
     e.preventDefault();
-    if (adminPinInput === 'llanotorneos123' || adminPinInput === '1234' || adminPinInput === 'admin') {
+    const cleanPin = adminPinInput.trim().toLowerCase();
+    if (cleanPin === 'llanotorneos123' || cleanPin === '1234' || cleanPin === 'admin') {
       setIsAdminAuthenticated(true);
       setShowPinModal(false);
       setAdminPinInput('');
@@ -639,7 +695,7 @@ export default function App() {
       playBeep(800, 0.25);
       triggerNotification('success', 'Sesión de Administrador Autorizada.');
     } else {
-      setAdminError('Código de acceso incorrecto.');
+      setAdminError('Código de acceso incorrecto. Por favor introduce la clave correcta.');
       playBeep(220, 0.4);
     }
   };
@@ -689,7 +745,7 @@ export default function App() {
       return;
     }
 
-    const headers = ['Nombre Completo', 'Documento', 'Edad', 'Ciudad Residencia', 'Celular', 'Correo', 'Evento Registrado', 'Categoría', 'Fecha Registro'];
+    const headers = ['Nombre Completo', 'Documento', 'Edad', 'Ciudad Residencia', 'Celular', 'Correo', 'Evento Registrado', 'Categoria', 'Fecha Registro'];
     const rows = filteredList.map(p => [
       p.nombreCompleto,
       p.documento,
@@ -854,7 +910,7 @@ export default function App() {
 
     const rouletteEventObj = events.find(ev => ev.nombre === selectedRouletteEvent);
     const rouletteBrand = rouletteEventObj?.categoria === 'gaming' ? 'gaming' : 'sport';
-    const activeBrandColorRaw = brandStyles[rouletteBrand].primaryRaw;
+    const activeBrandColorRaw = brandStyles[rouletteBrand]?.primaryRaw || '#22d3ee';
 
     // Configuración dinámica de luces de neón en la ruleta
     ctx.strokeStyle = activeBrandColorRaw;
@@ -999,18 +1055,20 @@ export default function App() {
   };
 
   const handleImageError = (e) => {
-    e.target.style.display = 'none';
+    e.target.src = activeBrand === 'sport' 
+      ? 'https://images.unsplash.com/photo-1508098682722-e99c43a406b2?auto=format&fit=crop&w=150&h=150&q=80'
+      : 'https://images.unsplash.com/photo-1538481199705-c710c4e965fc?auto=format&fit=crop&w=150&h=150&q=80';
   };
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans transition-all duration-500 selection:bg-slate-100 selection:text-slate-950">
       
-      {/* Header adaptable */}
+      {/* Header adaptable - Con espaciado estético, menú compacto y destacados iconos grandes (w-5 h-5) */}
       <header className="sticky top-0 z-40 bg-slate-900/95 backdrop-blur-md border-b border-slate-800 transition-colors duration-300">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="max-w-7xl mx-auto px-6 sm:px-8">
           <div className="flex items-center justify-between h-20">
             {/* Cabecera / Marca Adaptable */}
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-4">
               <div className="relative group">
                 <div className={`absolute -inset-1 rounded-full blur opacity-25 group-hover:opacity-75 transition duration-500 ${activeBrand === 'sport' ? 'bg-cyan-400' : 'bg-red-500'}`}></div>
                 <img 
@@ -1021,23 +1079,23 @@ export default function App() {
                 />
               </div>
               <div>
-                <h1 className="text-lg sm:text-xl font-black tracking-tight uppercase text-white transition-colors duration-300">
-                  Llano Torneo<span className={`${activeBrandStyles.titleColor} font-extrabold text-md sm:text-lg block sm:inline sm:ml-1 transition-colors duration-300`}>{activeBrandStyles.title}</span>
+                <h1 className="text-lg sm:text-xl font-black tracking-wider uppercase text-white transition-colors duration-300">
+                  Llano Torneo<span className={`${activeBrandStyles.titleColor} font-extrabold text-md sm:text-lg block sm:inline sm:ml-1.5 transition-colors duration-300`}>{activeBrandStyles.title}</span>
                 </h1>
               </div>
             </div>
 
-            {/* Desktop Navigation */}
-            <nav className="hidden md:flex items-center gap-2">
+            {/* Desktop Navigation - Separación holgada, tipografía compacta e iconos destacados de w-5 h-5 */}
+            <nav className="hidden md:flex items-center gap-5 lg:gap-6">
               <button 
-                onClick={() => setActiveTab('register')}
-                className={`flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold transition-all duration-300 ${
+                onClick={() => { setActiveTab('register'); setMobileMenuOpen(false); }}
+                className={`flex items-center gap-2.5 px-3.5 py-2.5 rounded-lg text-[11px] font-bold uppercase tracking-wider transition-all duration-300 hover:scale-[1.02] ${
                   activeTab === 'register' 
                     ? `bg-gradient-to-r ${activeBrandStyles.gradient} text-slate-950 shadow-lg ${activeBrandStyles.shadowAccent}` 
                     : 'text-slate-300 hover:bg-slate-800 hover:text-white'
                 }`}
               >
-                <UserPlus className="w-4 h-4" />
+                <UserPlus className="w-5 h-5 shrink-0" />
                 Registrarse
               </button>
 
@@ -1045,49 +1103,49 @@ export default function App() {
                 <>
                   <button 
                     onClick={() => handleAdminTabAccess('admin-list')}
-                    className={`flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold transition-all duration-300 ${
+                    className={`flex items-center gap-2.5 px-3.5 py-2.5 rounded-lg text-[11px] font-bold uppercase tracking-wider transition-all duration-300 hover:scale-[1.02] ${
                       activeTab === 'admin-list' 
                         ? `bg-gradient-to-r ${activeBrandStyles.gradient} text-slate-950 shadow-lg ${activeBrandStyles.shadowAccent}` 
                         : 'text-slate-300 hover:bg-slate-800 hover:text-white'
                     }`}
                   >
-                    <Users className="w-4 h-4" />
+                    <Users className="w-5 h-5 shrink-0" />
                     Panel Registrados
                   </button>
 
                   <button 
                     onClick={() => handleAdminTabAccess('roulette')}
-                    className={`flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold transition-all duration-300 ${
+                    className={`flex items-center gap-2.5 px-3.5 py-2.5 rounded-lg text-[11px] font-bold uppercase tracking-wider transition-all duration-300 hover:scale-[1.02] ${
                       activeTab === 'roulette' 
                         ? `bg-gradient-to-r ${activeBrandStyles.gradient} text-slate-950 shadow-lg ${activeBrandStyles.shadowAccent}` 
                         : 'text-slate-300 hover:bg-slate-800 hover:text-white'
                     }`}
                   >
-                    <Gift className="w-4 h-4" />
+                    <Gift className="w-5 h-5 shrink-0" />
                     Ruleta Sorteo
                   </button>
 
                   <button 
                     onClick={() => handleAdminTabAccess('manage-events')}
-                    className={`flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold transition-all duration-300 ${
+                    className={`flex items-center gap-2.5 px-3.5 py-2.5 rounded-lg text-[11px] font-bold uppercase tracking-wider transition-all duration-300 hover:scale-[1.02] ${
                       activeTab === 'manage-events' 
                         ? `bg-gradient-to-r ${activeBrandStyles.gradient} text-slate-950 shadow-lg ${activeBrandStyles.shadowAccent}` 
                         : 'text-slate-300 hover:bg-slate-800 hover:text-white'
                     }`}
                   >
-                    <Calendar className="w-4 h-4" />
+                    <Calendar className="w-5 h-5 shrink-0" />
                     Gestión Eventos
                   </button>
 
                   <button 
                     onClick={() => handleAdminTabAccess('sponsors')}
-                    className={`flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold transition-all duration-300 ${
+                    className={`flex items-center gap-2.5 px-3.5 py-2.5 rounded-lg text-[11px] font-bold uppercase tracking-wider transition-all duration-300 hover:scale-[1.02] ${
                       activeTab === 'sponsors' 
                         ? `bg-gradient-to-r ${activeBrandStyles.gradient} text-slate-950 shadow-lg ${activeBrandStyles.shadowAccent}` 
                         : 'text-slate-300 hover:bg-slate-800 hover:text-white'
                     }`}
                   >
-                    <Award className="w-4 h-4" />
+                    <Award className="w-5 h-5 shrink-0" />
                     Marcas Aliadas
                   </button>
                 </>
@@ -1095,7 +1153,7 @@ export default function App() {
             </nav>
 
             {/* Opciones Especiales */}
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-4">
               <button 
                 onClick={() => setSoundEnabled(!soundEnabled)}
                 className={`p-2 rounded-lg bg-slate-800 text-slate-300 transition-colors ${activeBrand === 'sport' ? 'hover:text-cyan-400' : 'hover:text-red-500'}`}
@@ -1105,16 +1163,16 @@ export default function App() {
               </button>
 
               {isAdminAuthenticated ? (
-                <div className={`hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold border transition-colors ${activeBrand === 'sport' ? 'bg-cyan-950/40 border-cyan-800/60 text-cyan-400' : 'bg-red-950/40 border-red-800/60 text-red-500'}`}>
+                <div className={`hidden sm:flex items-center gap-2 px-4 py-2 rounded-full text-xs font-bold border transition-colors ${activeBrand === 'sport' ? 'bg-cyan-950/40 border-cyan-800/60 text-cyan-400' : 'bg-red-950/40 border-red-800/60 text-red-500'}`}>
                   <span className={`w-2 h-2 rounded-full animate-pulse ${activeBrand === 'sport' ? 'bg-cyan-400' : 'bg-red-500'}`}></span>
                   Admin Activado
                 </div>
               ) : (
                 <button 
                   onClick={() => setShowPinModal(true)}
-                  className={`hidden sm:flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-xs px-3 py-1.5 rounded-lg transition text-slate-300 hover:text-white`}
+                  className="hidden sm:flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-xs px-4 py-2 rounded-lg transition text-slate-300 hover:text-white font-bold uppercase tracking-wider"
                 >
-                  <Lock className={`w-3.5 h-3.5 ${activeBrandStyles.textAccent}`} />
+                  <Lock className={`w-4 h-4 ${activeBrandStyles.textAccent}`} />
                   Acceso Admin
                 </button>
               )}
@@ -1139,7 +1197,7 @@ export default function App() {
                 activeTab === 'register' ? `bg-gradient-to-r ${activeBrandStyles.gradient} text-slate-950` : 'text-slate-300 hover:bg-slate-800'
               }`}
             >
-              <UserPlus className="w-5 h-5" />
+              <UserPlus className="w-5 h-5 shrink-0" />
               Inscripción de Participantes
             </button>
             
@@ -1151,7 +1209,7 @@ export default function App() {
                     activeTab === 'admin-list' ? `bg-gradient-to-r ${activeBrandStyles.gradient} text-slate-950` : 'text-slate-300 hover:bg-slate-800'
                   }`}
                 >
-                  <Users className="w-5 h-5" />
+                  <Users className="w-5 h-5 shrink-0" />
                   Lista de Inscritos
                 </button>
                 <button 
@@ -1160,7 +1218,7 @@ export default function App() {
                     activeTab === 'roulette' ? `bg-gradient-to-r ${activeBrandStyles.gradient} text-slate-950` : 'text-slate-300 hover:bg-slate-800'
                   }`}
                 >
-                  <Gift className="w-5 h-5" />
+                  <Gift className="w-5 h-5 shrink-0" />
                   Ruleta de Sorteos
                 </button>
                 <button 
@@ -1169,7 +1227,7 @@ export default function App() {
                     activeTab === 'manage-events' ? `bg-gradient-to-r ${activeBrandStyles.gradient} text-slate-950` : 'text-slate-300 hover:bg-slate-800'
                   }`}
                 >
-                  <Calendar className="w-5 h-5" />
+                  <Calendar className="w-5 h-5 shrink-0" />
                   Gestión de Eventos
                 </button>
 
@@ -1179,7 +1237,7 @@ export default function App() {
                     activeTab === 'sponsors' ? `bg-gradient-to-r ${activeBrandStyles.gradient} text-slate-950` : 'text-slate-300 hover:bg-slate-800'
                   }`}
                 >
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
+                  <Award className="w-5 h-5 shrink-0" />
                   Marcas Aliadas
                 </button>
               </>
@@ -1196,7 +1254,7 @@ export default function App() {
                   onClick={() => { setShowPinModal(true); setMobileMenuOpen(false); }}
                   className="w-full flex items-center gap-2 px-4 py-2 text-xs bg-slate-800 text-slate-300 rounded-lg hover:text-white"
                 >
-                  <Lock className={`w-4.5 h-4.5 mr-1 ${activeBrandStyles.textAccent}`} />
+                  <Lock className={`w-4 h-4 mr-1 ${activeBrandStyles.textAccent}`} />
                   Iniciar Sesión de Administrador
                 </button>
               )}
@@ -1464,28 +1522,29 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* --- REQUISITO DE PATROCINADORES (PARTE A) --- */}
+                {/* --- REQUISITO DE PATROCINADORES (Sponsor Gate) --- */}
                 <div className="mt-6 p-4 rounded-xl border border-slate-800 bg-slate-900/50">
                   <div className="flex items-center justify-between gap-4">
                     <div>
                       <h4 className="text-white font-medium text-sm mb-0.5">Apoya a nuestras marcas aliadas</h4>
-                      <p className="text-xs text-slate-400">
-                        Requisito obligatorio para habilitar tu registro ({followedSponsors.length}/{sponsorsList.length})
+                      <p className="text-xs text-slate-400 col-span-2">
+                        {filteredSponsorsForRegister.length > 0 
+                          ? `Requisito obligatorio para habilitar tu registro (${followedSponsors.filter(id => filteredSponsorsForRegister.some(s => s.id === id)).length}/${filteredSponsorsForRegister.length})`
+                          : 'Este evento no requiere validación de marcas asociadas.'
+                        }
                       </p>
                     </div>
                     
                     {allSponsorsFollowed ? (
                       <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 shrink-0">
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7"></path>
-                        </svg>
+                        <CheckCircle className="w-4.5 h-4.5" />
                         <span className="text-xs font-bold uppercase tracking-wider">Listo</span>
                       </div>
                     ) : (
                       <button
                         type="button"
                         onClick={() => setShowSponsorsModal(true)}
-                        className={`px-4 py-2 rounded-lg text-xs font-black uppercase tracking-wider text-white transition-all duration-300 bg-gradient-to-r ${brandStyles[activeBrand].gradient} hover:scale-105 shadow-lg ${brandStyles[activeBrand].shadow} shrink-0`}
+                        className={`px-4 py-2 rounded-lg text-xs font-black uppercase tracking-wider text-white transition-all duration-300 bg-gradient-to-r ${activeBrandStyles.gradient} hover:scale-105 shadow-lg shrink-0`}
                       >
                         Ver Marcas
                       </button>
@@ -1768,7 +1827,7 @@ export default function App() {
               {/* Contenedor del Canvas de la Ruleta */}
               <div className="relative my-4 flex items-center justify-center">
                 {/* Flecha indicadora adaptable */}
-                <div className={`absolute -top-3.5 z-30 drop-shadow-lg animate-bounce`}>
+                <div className="absolute -top-3.5 z-30 drop-shadow-lg animate-bounce">
                   <div className={`w-8 h-8 rotate-45 transform origin-center border-2 border-white rounded-br-md ${activeBrand === 'sport' ? 'bg-cyan-400' : 'bg-red-500'}`}></div>
                 </div>
 
@@ -1875,7 +1934,7 @@ export default function App() {
                   />
                 </div>
 
-                {/* NUEVO: Selector de Categoría (Sport / Gaming) */}
+                {/* Selector de Categoría (Sport / Gaming) */}
                 <div className="space-y-1.5">
                   <label className="block text-xs font-bold uppercase text-slate-400">Categoría de la Marca *</label>
                   <div className="grid grid-cols-2 gap-2">
@@ -2020,52 +2079,151 @@ export default function App() {
           </div>
         )}
 
-        {/* Tab 5: Gestion de sponsors */}
+        {/* Tab 5: Gestión de Patrocinadores (Marcas Aliadas) con soporte Multievento */}
         {activeTab === 'sponsors' && isAdminAuthenticated && (
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 mt-6 shadow-2xl animate-fade-in">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-2xl animate-fade-in">
             <h3 className="text-white font-black uppercase tracking-wider mb-6 flex items-center gap-2">
-              <svg className="w-5 h-5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path>
-              </svg>
-              Gestionar Marcas Aliadas
+              <Award className="w-5 h-5 text-emerald-400" />
+              Gestionar Marcas Aliadas (Sponsor Gate)
             </h3>
             
             {/* Formulario para añadir/editar */}
-            <form onSubmit={handleSaveSponsor} className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-              <input 
-                type="text" 
-                placeholder="Nombre de la marca" 
-                value={newSponsor.nombre} 
-                onChange={(e) => setNewSponsor({...newSponsor, nombre: e.target.value})}
-                className="bg-slate-950 border border-slate-800 rounded-lg px-4 py-2 text-white placeholder-slate-600 focus:outline-none focus:border-emerald-500" 
-              />
-              <input 
-                type="url" 
-                placeholder="Enlace (ej: https://instagram.com/...)" 
-                value={newSponsor.enlace} 
-                onChange={(e) => setNewSponsor({...newSponsor, enlace: e.target.value})}
-                className="bg-slate-950 border border-slate-800 rounded-lg px-4 py-2 text-white placeholder-slate-600 focus:outline-none focus:border-emerald-500" 
-              />
-              <button 
-                type="submit" 
-                className={`font-bold rounded-lg text-slate-950 hover:opacity-90 transition-all shadow-md ${
-                  isEditingSponsor 
-                    ? 'bg-amber-500' 
-                    : `bg-gradient-to-r ${activeBrandStyles.gradient}`
-                }`}
-              >
-                {isEditingSponsor ? 'Actualizar Marca' : 'Añadir Marca'}
-              </button>
+            <form onSubmit={handleSaveSponsor} className="grid grid-cols-1 md:grid-cols-3 gap-5 mb-8 bg-slate-950/40 p-5 rounded-xl border border-slate-800/60">
+              <div className="space-y-1">
+                <label className="block text-xs font-bold uppercase text-slate-400">Nombre de la marca *</label>
+                <input 
+                  type="text" 
+                  placeholder="Ej: Gatorade" 
+                  value={newSponsor.nombre} 
+                  required
+                  onChange={(e) => setNewSponsor({...newSponsor, nombre: e.target.value})}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2.5 text-white placeholder-slate-600 focus:outline-none focus:border-emerald-500 text-sm" 
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="block text-xs font-bold uppercase text-slate-400">Enlace web de redirección *</label>
+                <input 
+                  type="url" 
+                  placeholder="Ej: https://instagram.com/gatorade" 
+                  value={newSponsor.enlace} 
+                  required
+                  onChange={(e) => setNewSponsor({...newSponsor, enlace: e.target.value})}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2.5 text-white placeholder-slate-600 focus:outline-none focus:border-emerald-500 text-sm" 
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="block text-xs font-bold uppercase text-slate-400">Tipo de Vinculación de Evento *</label>
+                <select 
+                  value={newSponsor.vinculacion} 
+                  onChange={(e) => setNewSponsor({...newSponsor, vinculacion: e.target.value, eventosIds: e.target.value === 'all' ? [] : newSponsor.eventosIds})}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-emerald-500 text-sm"
+                >
+                  <option value="all">🌐 Todos los Eventos (Global)</option>
+                  <option value="custom">🎯 Eventos Seleccionados (Específico)</option>
+                </select>
+              </div>
+
+              {/* Casillas para vincular a múltiples eventos de forma independiente */}
+              {newSponsor.vinculacion === 'custom' && (
+                <div className="col-span-1 md:col-span-3 space-y-2 p-4 bg-slate-950/80 rounded-xl border border-slate-800/80">
+                  <span className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-2">
+                    Selecciona uno o varios eventos a los que deseas vincular esta marca aliada:
+                  </span>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {events.map((ev) => {
+                      const isChecked = newSponsor.eventosIds?.includes(ev.id);
+                      return (
+                        <label 
+                          key={ev.id} 
+                          className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-all duration-200 select-none ${
+                            isChecked 
+                              ? 'bg-slate-900 border-emerald-500/40 text-emerald-400 shadow-inner' 
+                              : 'bg-slate-950 border-slate-800/80 text-slate-400 hover:border-slate-700'
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={() => {
+                              const currentList = newSponsor.eventosIds || [];
+                              const updated = currentList.includes(ev.id)
+                                ? currentList.filter(id => id !== ev.id)
+                                : [...currentList, ev.id];
+                              setNewSponsor(prev => ({ ...prev, eventosIds: updated }));
+                            }}
+                            className="rounded border-slate-800 bg-slate-950 text-emerald-500 focus:ring-emerald-500 focus:ring-offset-slate-900 w-4.5 h-4.5"
+                          />
+                          <span className="text-xs font-semibold truncate">{ev.nombre}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              <div className="col-span-1 md:col-span-3 flex justify-end">
+                <button 
+                  type="submit" 
+                  className={`font-black rounded-lg text-slate-950 hover:opacity-90 transition-all shadow-md text-xs py-3 px-6 uppercase ${
+                    isEditingSponsor 
+                      ? 'bg-amber-500' 
+                      : `bg-gradient-to-r ${activeBrandStyles.gradient}`
+                  }`}
+                >
+                  {isEditingSponsor ? 'Actualizar Marca' : 'Añadir Marca'}
+                </button>
+              </div>
             </form>
 
             {/* Lista de Marcas */}
+            <h4 className="text-white font-bold text-sm uppercase tracking-wider mb-4">Marcas Registradas</h4>
             <div className="space-y-3">
               {sponsorsList.map(sponsor => (
-                <div key={sponsor.id} className="bg-slate-950 border border-slate-800 p-4 rounded-xl flex items-center justify-between">
-                  <span className="text-white font-medium">{sponsor.nombre}</span>
+                <div key={sponsor.id} className="bg-slate-950 border border-slate-800 p-4 rounded-xl flex flex-wrap items-center justify-between gap-4">
+                  <div>
+                    <span className="text-white font-bold block text-sm">{sponsor.nombre}</span>
+                    <div className="flex flex-wrap items-center gap-2 mt-1">
+                      <a href={sponsor.enlace} target="_blank" rel="noopener noreferrer" className="text-xs text-sky-400 hover:underline truncate max-w-xs block mr-2">
+                        {sponsor.enlace}
+                      </a>
+                      <span className={`px-2.5 py-0.5 rounded text-[10px] font-bold ${
+                        sponsor.vinculacion === 'all' || !sponsor.vinculacion
+                          ? 'bg-emerald-950/60 text-emerald-400 border border-emerald-900/40'
+                          : 'bg-sky-950/60 text-sky-400 border border-sky-900/40'
+                      }`}>
+                        {sponsor.vinculacion === 'all' || !sponsor.vinculacion ? '🌐 Global (Todos los eventos)' : `🎯 Específico (${sponsor.eventosIds?.length || 0} Eventos)`}
+                      </span>
+                    </div>
+
+                    {sponsor.vinculacion === 'custom' && sponsor.eventosIds && sponsor.eventosIds.length > 0 && (
+                      <div className="mt-2.5 flex flex-wrap gap-1.5">
+                        {sponsor.eventosIds.map(evId => {
+                          const ev = events.find(e => e.id === evId);
+                          return (
+                            <span key={evId} className="px-2 py-0.5 rounded bg-slate-900 text-[10px] text-slate-400 border border-slate-800">
+                              {ev ? ev.nombre : `ID: ${evId}`}
+                            </span>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                  
                   <div className="flex gap-3">
-                    <button onClick={() => handleEditSponsor(sponsor)} className="text-amber-400 hover:text-amber-300 text-sm font-semibold">Editar</button>
-                    <button onClick={() => handleDeleteSponsor(sponsor.id)} className="text-rose-500 hover:text-rose-400 text-sm font-semibold">Eliminar</button>
+                    <button 
+                      onClick={() => handleEditSponsor(sponsor)} 
+                      className="text-amber-400 hover:text-amber-300 text-xs font-bold uppercase transition"
+                    >
+                      Editar
+                    </button>
+                    <button 
+                      onClick={() => setDeleteSponsorTarget({ id: sponsor.id, nombre: sponsor.nombre })} 
+                      className="text-rose-500 hover:text-rose-400 text-xs font-bold uppercase transition"
+                    >
+                      Eliminar
+                    </button>
                   </div>
                 </div>
               ))}
@@ -2078,7 +2236,7 @@ export default function App() {
   
       </main>
 
-      {/* MODAL 1: Autenticación de Organizador */}
+      {/* MODAL 1: Autenticación de Organizador (Sin claves expuestas ni placeholders predictivos) */}
       {showPinModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4 animate-fade-in">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-6 shadow-2xl">
@@ -2096,7 +2254,7 @@ export default function App() {
             </div>
 
             <p className="text-xs text-slate-400 mb-4">
-              Ingresa el PIN de seguridad para administrar la plataforma, cambiar la visibilidad de inscritos y operar la ruleta electrónica.
+              Ingresa la contraseña maestra para habilitar las opciones avanzadas de administración, sorteos en vivo y control de marcas.
             </p>
 
             <form onSubmit={handleAdminAuth} className="space-y-4">
@@ -2106,7 +2264,7 @@ export default function App() {
                   type="password" 
                   value={adminPinInput}
                   onChange={(e) => setAdminPinInput(e.target.value)}
-                  placeholder="Escribe la clave" 
+                  placeholder="Introduce la contraseña" 
                   className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-cyan-400 transition"
                   autoFocus
                 />
@@ -2224,13 +2382,45 @@ export default function App() {
         </div>
       )}
 
-      {/* MODAL: Marcas Aliadas */}
+      {/* MODAL 5: Eliminar Marca Aliada (Verificación antes de borrar) */}
+      {deleteSponsorTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4 animate-fade-in">
+          <div className="bg-slate-900 border border-slate-800 rounded-xl max-w-sm w-full p-6 shadow-2xl">
+            <h3 className="text-md font-bold text-white mb-2 uppercase flex items-center gap-1.5">
+              <AlertCircle className="w-5 h-5 text-rose-500" /> Confirmar Eliminación de Marca
+            </h3>
+            <p className="text-xs text-slate-400 mb-6">
+              ¿Estás seguro de que deseas eliminar permanentemente la marca aliada <span className={`font-bold ${activeBrandStyles.textAccent}`}>"{deleteSponsorTarget.nombre}"</span>? Ya no se requerirá seguirla para los eventos vinculados.
+            </p>
+            <div className="flex gap-3 justify-end">
+              <button 
+                onClick={() => setDeleteSponsorTarget(null)}
+                className="bg-slate-800 hover:bg-slate-700 px-4 py-2 rounded-lg text-xs font-semibold text-slate-300 transition"
+              >
+                Cancelar
+              </button>
+              <button 
+                onClick={async () => {
+                  await handleDeleteSponsor(deleteSponsorTarget.id);
+                  setDeleteSponsorTarget(null);
+                }}
+                className="bg-rose-600 hover:bg-rose-500 px-4 py-2 rounded-lg text-xs font-semibold text-white transition"
+              >
+                Confirmar Eliminación
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: Marcas Aliadas en Registro (Muestra de forma exclusiva las marcas asociadas al evento actual) */}
       {showSponsorsModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/90 backdrop-blur-md p-4 animate-fade-in">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full p-6 shadow-2xl relative overflow-hidden">
             <div className="flex justify-between items-center mb-6">
               <h3 className="text-xl font-black text-white uppercase tracking-wider">Marcas Aliadas</h3>
               <button 
+                type="button"
                 onClick={() => setShowSponsorsModal(false)}
                 className="text-slate-400 hover:text-white transition"
               >
@@ -2239,35 +2429,37 @@ export default function App() {
             </div>
 
             <p className="text-slate-400 text-sm mb-6">
-              Haz clic en los enlaces de nuestros patrocinadores para desbloquear tu registro:
+              Haz clic en los enlaces de nuestros patrocinadores para desbloquear tu registro para este evento:
             </p>
 
-            <div className="space-y-3">
-              {sponsorsList.map(sponsor => (
+            <div className="space-y-3 max-h-[350px] overflow-y-auto pr-1">
+              {filteredSponsorsForRegister.map(sponsor => (
                 <button
                   key={sponsor.id}
+                  type="button"
                   onClick={() => handleFollowClick(sponsor.id, sponsor.enlace)}
-                  className={`w-full p-4 rounded-xl border flex items-center justify-between transition-all ${
+                  className={`w-full p-4 rounded-xl border flex items-center justify-between transition-all text-left ${
                     followedSponsors.includes(sponsor.id)
                       ? 'bg-emerald-950/20 border-emerald-500/50'
-                      : 'bg-slate-800 border-slate-700 hover:border-slate-500'
+                      : 'bg-slate-800 border-slate-700 hover:border-slate-500 hover:scale-[1.01]'
                   }`}
                 >
                   <span className="font-bold text-white">{sponsor.nombre}</span>
                   {followedSponsors.includes(sponsor.id) ? (
-                    <CheckCircle className="w-5 h-5 text-emerald-400" />
+                    <CheckCircle className="w-5 h-5 text-emerald-400 shrink-0" />
                   ) : (
-                    <span className="text-xs font-bold bg-slate-700 px-2 py-1 rounded text-slate-300">VISITAR</span>
+                    <span className="text-xs font-bold bg-slate-700 px-2.5 py-1 rounded text-slate-300">VISITAR</span>
                   )}
                 </button>
               ))}
             </div>
             
             <button 
+              type="button"
               onClick={() => setShowSponsorsModal(false)}
               className="w-full mt-6 bg-slate-800 hover:bg-slate-700 text-white font-bold py-3 rounded-xl transition"
             >
-              Cerrar
+              Cerrar Ventana
             </button>
           </div>
         </div>

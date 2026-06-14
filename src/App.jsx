@@ -173,6 +173,11 @@ export default function App() {
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
+  // --- NUEVOS ESTADOS PARA GESTIÓN DE SORTEO SIN REPETICIONES ---
+  const [sorteoActive, setSorteoActive] = useState(false);
+  const [sorteoCandidates, setSorteoCandidates] = useState([]);
+  const [sorteoWinners, setSorteoWinners] = useState([]);
+
   // --- ESTADOS DE PAGINACIÓN OPTIMIZADA (CLIENT-SIDE) ---
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
@@ -524,6 +529,9 @@ export default function App() {
       playBeep(880, 0.3);
       setFormStatus({ type: 'success', message: `¡Inscripción exitosa a "${formData.evento}"! Datos guardados.` });
       
+      // SOLUCIÓN AL PROBLEMA 1: Resetear el requisito de seguimiento para el siguiente registro
+      setFollowedSponsors([]);
+
       setFormData(prev => ({
         ...prev,
         nombreCompleto: '',
@@ -732,6 +740,12 @@ export default function App() {
       await deleteDoc(docRef);
       playBeep(300, 0.2);
       triggerNotification('success', 'Participante eliminado.');
+      
+      // Si el participante eliminado estaba en la ruleta del sorteo activo, lo removemos también
+      if (sorteoActive) {
+        setSorteoCandidates(prev => prev.filter(p => p.id !== deleteTargetId));
+        setSorteoWinners(prev => prev.filter(p => p.id !== deleteTargetId));
+      }
     } catch (error) {
       triggerNotification('error', 'No se pudo eliminar el registro.');
     } finally {
@@ -884,10 +898,14 @@ export default function App() {
   const [spinTime, setSpinTime] = useState(0);
   const [spinTimeTotal, setSpinTimeTotal] = useState(0);
 
+  // Pool general de participantes del evento de la ruleta
   const roulettePool = participants.filter(p => p.evento === selectedRouletteEvent);
 
-  // OPTIMIZACIÓN DE RULETA PARA ENORMES VOLÚMENES: Si supera los 50 inscritos cambia a modo "Sorteo de Alto Rendimiento"
-  const isMassivePool = roulettePool.length > 50;
+  // SOLUCIÓN AL PROBLEMA 2: Determinar qué pool dinámico usar para la ruleta
+  const activePoolForDraw = sorteoActive ? sorteoCandidates : roulettePool;
+
+  // Si supera los 50 inscritos cambia a modo "Sorteo de Alto Rendimiento" para optimizar el render
+  const isMassivePool = activePoolForDraw.length > 50;
 
   const drawRouletteWheel = () => {
     const canvas = canvasRef.current;
@@ -901,7 +919,7 @@ export default function App() {
 
     ctx.clearRect(0, 0, width, height);
 
-    if (roulettePool.length === 0) {
+    if (activePoolForDraw.length === 0) {
       ctx.fillStyle = '#1e293b';
       ctx.beginPath();
       ctx.arc(centerX, centerY, radius, 0, 2 * Math.PI);
@@ -913,9 +931,9 @@ export default function App() {
       ctx.fillStyle = '#94a3b8';
       ctx.font = 'bold 14px sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText('Sin participantes registrados', centerX, centerY - 10);
+      ctx.fillText(sorteoActive ? 'No quedan candidatos' : 'Sin participantes registrados', centerX, centerY - 10);
       ctx.font = '12px sans-serif';
-      ctx.fillText('en este evento aún', centerX, centerY + 10);
+      ctx.fillText(sorteoActive ? 'en este sorteo especial' : 'en este evento aún', centerX, centerY + 10);
       return;
     }
 
@@ -924,7 +942,7 @@ export default function App() {
     const activeBrandColorRaw = brandStyles[rouletteBrand]?.primaryRaw || '#22d3ee';
 
     // Para evitar la saturación del canvas, limitamos visualmente el dibujo a un número de segmentos premium de alto rendimiento
-    const renderLength = isMassivePool ? 20 : roulettePool.length;
+    const renderLength = isMassivePool ? 20 : activePoolForDraw.length;
     const arc = Math.PI / (renderLength / 2);
 
     ctx.strokeStyle = activeBrandColorRaw;
@@ -975,7 +993,7 @@ export default function App() {
       if (isMassivePool) {
         textToRender = `BOMBO #${i + 1}`;
       } else {
-        const rawText = roulettePool[i].nombreCompleto;
+        const rawText = activePoolForDraw[i].nombreCompleto;
         textToRender = rawText.length > 15 ? rawText.substring(0, 13) + '..' : rawText;
       }
 
@@ -1003,17 +1021,27 @@ export default function App() {
 
   useEffect(() => {
     drawRouletteWheel();
-  }, [startAngle, participants, selectedRouletteEvent, events]);
+  }, [startAngle, participants, selectedRouletteEvent, events, sorteoActive, sorteoCandidates, roulettePool]);
 
   // Actualizador veloz de nombres ciclando durante sorteos masivos
   useEffect(() => {
-    if (!isSpinning || !isMassivePool || roulettePool.length === 0) return;
+    if (!isSpinning || !isMassivePool || activePoolForDraw.length === 0) return;
     const interval = setInterval(() => {
-      const randomIndex = Math.floor(Math.random() * roulettePool.length);
-      setCyclingName(roulettePool[randomIndex].nombreCompleto);
+      const randomIndex = Math.floor(Math.random() * activePoolForDraw.length);
+      setCyclingName(activePoolForDraw[randomIndex].nombreCompleto);
     }, 60);
     return () => clearInterval(interval);
-  }, [isSpinning, isMassivePool, roulettePool]);
+  }, [isSpinning, isMassivePool, activePoolForDraw, roulettePool]);
+
+  // Manejo del cambio de evento en la ruleta para reiniciar el sorteo activo si es necesario
+  useEffect(() => {
+    if (sorteoActive) {
+      setSorteoActive(false);
+      setSorteoCandidates([]);
+      setSorteoWinners([]);
+      triggerNotification('success', 'Evento cambiado. Sorteo restablecido al estado general.');
+    }
+  }, [selectedRouletteEvent]);
 
   useEffect(() => {
     if (!isSpinning) return;
@@ -1032,7 +1060,7 @@ export default function App() {
       const easing = 1 - Math.pow(1 - ts, 3); 
       const currentAngle = startAngle + (spinAngleStart * (1 - easing)) * (Math.PI / 180);
       
-      const totalSlices = isMassivePool ? 20 : roulettePool.length;
+      const totalSlices = isMassivePool ? 20 : activePoolForDraw.length;
       if (totalSlices > 0) {
         const arc = 360 / totalSlices;
         const prevStep = Math.floor((startAngle * 180 / Math.PI) / arc);
@@ -1052,8 +1080,8 @@ export default function App() {
 
   const spinTheWheel = () => {
     if (isSpinning) return;
-    if (roulettePool.length === 0) {
-      triggerNotification('error', 'No hay personas inscritas en este evento para sortear.');
+    if (activePoolForDraw.length === 0) {
+      triggerNotification('error', 'No hay personas disponibles en la ruleta de este evento.');
       return;
     }
 
@@ -1069,18 +1097,45 @@ export default function App() {
 
   const stopRotateWheel = () => {
     setIsSpinning(false);
-    const len = roulettePool.length;
+    const len = activePoolForDraw.length;
     if (len === 0) return;
 
     // Sorteo matemático de alta precisión inmune al lag visual del Canvas
     const winningIndex = Math.floor(Math.random() * len);
-    const chosenWinner = roulettePool[winningIndex];
+    const chosenWinner = activePoolForDraw[winningIndex];
     
     setWinnerName(chosenWinner.nombreCompleto);
     setWinnerDoc(chosenWinner.documento || ''); 
     setShowWinnerModal(true);
     playConfettiBeeps();
     setCyclingName('');
+
+    // SOLUCIÓN AL PROBLEMA 2: Eliminar participante de la ruleta y mandarlo al bombo de ganadores
+    if (sorteoActive) {
+      setSorteoWinners(prev => [...prev, chosenWinner]);
+      setSorteoCandidates(prev => prev.filter(p => p.id !== chosenWinner.id));
+    }
+  };
+
+  // CONTROLADORES PARA GESTIÓN DEL FLUJO DEL SORTEO DE 12 CUPOS
+  const handleStartSorteoSession = () => {
+    if (roulettePool.length === 0) {
+      triggerNotification('error', 'No hay personas registradas en este evento para iniciar un sorteo.');
+      return;
+    }
+    setSorteoCandidates([...roulettePool]);
+    setSorteoWinners([]);
+    setSorteoActive(true);
+    playBeep(880, 0.35);
+    triggerNotification('success', 'Sesión de Sorteo Activada. Los ganadores no se repetirán.');
+  };
+
+  const handleFinishSorteoSession = () => {
+    setSorteoActive(false);
+    setSorteoCandidates([]);
+    setSorteoWinners([]);
+    playBeep(440, 0.25);
+    triggerNotification('success', 'Sesión de Sorteo terminada. Se han reintegrado todos los ganadores al bombo general.');
   };
 
   const handleImageError = (e) => {
@@ -1113,7 +1168,7 @@ export default function App() {
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans transition-all duration-500 selection:bg-slate-100 selection:text-slate-950">
       
-      {/* Header adaptable - Con espaciado estético, menú compacto y destacados iconos grandes (w-5 h-5) */}
+      {/* Header adaptable - Con espaciado estético, menú compacto y destacados iconos grandes */}
       <header className="sticky top-0 z-40 bg-slate-900/95 backdrop-blur-md border-b border-slate-800 transition-colors duration-300">
         <div className="max-w-7xl mx-auto px-6 sm:px-8">
           <div className="flex items-center justify-between h-20">
@@ -1135,7 +1190,7 @@ export default function App() {
               </div>
             </div>
 
-            {/* Desktop Navigation - Separación holgada, tipografía compacta e iconos destacados de w-5 h-5 */}
+            {/* Desktop Navigation */}
             <nav className="hidden md:flex items-center gap-5 lg:gap-6">
               <button 
                 onClick={() => { setActiveTab('register'); setMobileMenuOpen(false); }}
@@ -1213,8 +1268,8 @@ export default function App() {
               </button>
 
               {isAdminAuthenticated ? (
-                <div className={`hidden sm:flex items-center gap-2 px-4 py-2 rounded-full text-xs font-bold border transition-colors ${activeBrand === 'sport' ? 'bg-cyan-400 text-cyan-400 border-cyan-800/60' : 'bg-red-500 text-red-500 border-red-800/60'}`}>
-                  <span className={`w-2 h-2 rounded-full animate-pulse ${activeBrand === 'sport' ? 'bg-cyan-400' : 'bg-red-500'}`}></span>
+                <div className={`hidden sm:flex items-center gap-2 px-4 py-2 rounded-full text-xs font-bold border transition-colors text-white ${activeBrand === 'sport' ? 'bg-cyan-600 border-cyan-500' : 'bg-red-600 border-red-500'}`}>
+                  <span className="w-2 h-2 rounded-full animate-pulse bg-white"></span>
                   Admin Activado
                 </div>
               ) : (
@@ -1576,11 +1631,10 @@ export default function App() {
                 <div className="mt-6 p-4 rounded-xl border border-slate-800 bg-slate-900/50">
                   <div className="flex items-center justify-between gap-4">
                     <div>
-                      {}
                       <h4 className={`font-bold text-sm mb-0.5 animate-pulse ${activeBrandStyles.textAccent}`}>
                         Misión obligatoria requerida
                       </h4>
-                      <p className="text-xs text-slate-400 col-span-2">
+                      <p className="text-xs text-slate-400">
                         {filteredSponsorsForRegister.length > 0 
                           ? `Debes seguir a todas las marcas aliadas en su Instagram para validar tu cupo. (${followedSponsors.filter(id => filteredSponsorsForRegister.some(s => s.id === id)).length}/${filteredSponsorsForRegister.length})`
                           : 'Este evento no requiere validación de marcas asociadas.'
@@ -1640,7 +1694,7 @@ export default function App() {
           </div>
         )}
 
-        {/* Tab 2: Panel de Registrados (Con Paginación de Alto Rendimiento) */}
+        {/* Tab 2: Panel de Registrados */}
         {activeTab === 'admin-list' && isAdminAuthenticated && (
           <div className="bg-slate-900 rounded-2xl border border-slate-800 shadow-2xl overflow-hidden animate-fade-in">
             
@@ -1650,7 +1704,7 @@ export default function App() {
                   <Users className={`w-5 h-5 ${activeBrandStyles.textAccent}`} />
                   CONTROL DE PARTICIPANTES MULTI-EVENTO
                 </h3>
-                <p className="text-xs text-slate-400">Base de datos estructurada con paginación de alta velocidad.</p>
+                <p className="text-xs text-slate-400">Base de datos de inscritos estructurada con paginación de alta velocidad.</p>
               </div>
 
               {/* Descarga de CSV y Excel */}
@@ -1911,7 +1965,10 @@ export default function App() {
                 <h3 className="text-xl font-black text-white mt-2 uppercase flex items-center justify-center gap-1.5">
                   RULETA ELECTRÓNICA 
                   {isMassivePool && (
-                    <span className="text-[10px] bg-amber-500 text-slate-950 px-2 py-0.5 rounded font-bold animate-pulse">MODO RENDIMIENTO</span>
+                    <span className="text-[10px] bg-amber-500 text-slate-950 px-2 py-0.5 rounded font-bold animate-pulse font-sans">MODO RENDIMIENTO</span>
+                  )}
+                  {sorteoActive && (
+                    <span className="text-[10px] bg-emerald-500 text-slate-950 px-2 py-0.5 rounded font-black tracking-wider animate-pulse font-sans">SESIÓN SORTEO ACTIVA</span>
                   )}
                 </h3>
                 
@@ -1921,8 +1978,9 @@ export default function App() {
                   </label>
                   <select
                     value={selectedRouletteEvent}
+                    disabled={sorteoActive}
                     onChange={(e) => setSelectedRouletteEvent(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs font-bold text-slate-300 focus:outline-none focus:border-cyan-400 transition"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs font-bold text-slate-300 focus:outline-none focus:border-cyan-400 transition disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     {events.map((ev) => (
                       <option key={ev.id} value={ev.nombre}>
@@ -1930,6 +1988,11 @@ export default function App() {
                       </option>
                     ))}
                   </select>
+                  {sorteoActive && (
+                    <p className="text-[10px] text-amber-400 font-semibold mt-1">
+                      Finaliza la sesión actual si deseas cambiar de evento.
+                    </p>
+                  )}
                 </div>
               </div>
 
@@ -1964,59 +2027,176 @@ export default function App() {
               <div className="w-full max-w-sm mt-4">
                 <button 
                   onClick={spinTheWheel}
-                  disabled={isSpinning || roulettePool.length === 0}
+                  disabled={isSpinning || activePoolForDraw.length === 0}
                   className={`w-full py-4 rounded-xl font-black tracking-widest text-sm uppercase transition duration-300 transform active:scale-95 shadow-xl ${
                     isSpinning 
                       ? 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700' 
-                      : roulettePool.length === 0 
+                      : activePoolForDraw.length === 0 
                         ? 'bg-slate-800 text-slate-400 border border-slate-700 cursor-not-allowed'
                         : `bg-gradient-to-r text-slate-950 hover:shadow-lg ${activeBrandStyles.gradient} ${activeBrandStyles.hoverGradient} ${activeBrandStyles.shadowAccent}`
                   }`}
                 >
-                  {isSpinning ? '¡GIRANDO RÁPIDAMENTE!' : roulettePool.length === 0 ? 'Faltan Inscritos para Iniciar' : '🔥 ¡GIRAR RULETA AHORA! 🔥'}
+                  {isSpinning 
+                    ? '¡GIRANDO RÁPIDAMENTE!' 
+                    : activePoolForDraw.length === 0 
+                      ? 'Faltan Inscritos para Iniciar' 
+                      : '🔥 ¡GIRAR RULETA AHORA! 🔥'
+                  }
                 </button>
               </div>
             </div>
 
-            {/* Sidebar de Bombo de Participantes */}
+            {/* SOLUCIÓN AL PROBLEMA 2: Sidebar de Bombo de Participantes / Bombo de Ganadores */}
             <div className="lg:col-span-5 bg-slate-900 rounded-2xl border border-slate-800 p-6 flex flex-col justify-between shadow-2xl">
               <div>
-                <h4 className="font-black text-white border-b border-slate-800 pb-3 uppercase tracking-wider text-sm flex items-center gap-2">
-                  <Award className={`w-4.5 h-4.5 ${activeBrandStyles.textAccent}`} />
-                  Bombo de Participantes ({roulettePool.length})
-                </h4>
-                
-                <p className="text-xs text-slate-400 my-3">
-                  Solo las personas registradas en el torneo seleccionado ingresarán al sorteo dinámico actual.
-                </p>
-
-                <div className="space-y-2 max-h-[350px] overflow-y-auto pr-1">
-                  {roulettePool.length > 0 ? (
-                    roulettePool.map((p, idx) => (
-                      <div 
-                        key={p.id || idx} 
-                        className="flex items-center justify-between bg-slate-950/60 p-3 rounded-lg border border-slate-800/80 text-xs"
-                      >
-                        <div className="font-bold text-slate-200">{p.nombreCompleto}</div>
-                        <div className={`text-[10px] uppercase font-semibold px-2.5 py-0.5 rounded border font-mono tracking-wider ${activeBrandStyles.textAccent} ${activeBrandStyles.bgAccentLight} ${activeBrandStyles.borderAccentLight}`}>
-                          {p.documento}
+                {sorteoActive ? (
+                  <div className="space-y-4">
+                    {/* Encabezado del Sorteo Especial */}
+                    <div className="border-b border-slate-800 pb-4">
+                      <div className="flex items-center justify-between">
+                        <h4 className="font-black text-white uppercase tracking-wider text-sm flex items-center gap-2">
+                          <Award className={`w-4.5 h-4.5 ${activeBrandStyles.textAccent}`} />
+                          Sorteo en Progreso
+                        </h4>
+                        <span className="bg-emerald-500 text-slate-950 text-[10px] font-black uppercase tracking-wider px-2.5 py-0.5 rounded-full animate-pulse">
+                          Exclusivo
+                        </span>
+                      </div>
+                      
+                      {/* Barra de progreso de cupos removida y optimizada a libre acumulación */}
+                      <div className="mt-3">
+                        <div className="flex justify-between text-xs font-bold text-slate-300">
+                          <span>Ganadores Elegidos:</span>
+                          <span className={activeBrandStyles.textAccent}>{sorteoWinners.length} Participantes</span>
                         </div>
                       </div>
-                    ))
-                  ) : (
-                    <div className="text-center py-10 text-slate-500 text-xs border-2 border-dashed border-slate-800 rounded-xl">
-                      ⚠️ No hay nadie registrado en este evento aún.
                     </div>
-                  )}
-                </div>
+
+                    {/* BOMBO DE GANADORES SELECCIONADOS */}
+                    <div>
+                      {}
+                      <span className="text-[10px] font-black tracking-widest text-amber-400 uppercase flex items-center gap-1.5 mb-2.5">
+                        🏆 BOMBO DE GANADORES ({sorteoWinners.length})
+                      </span>
+                      <div className="space-y-2 max-h-[170px] overflow-y-auto pr-1">
+                        {sorteoWinners.length > 0 ? (
+                          sorteoWinners.map((winner, idx) => (
+                            <div 
+                              key={winner.id || idx}
+                              className="flex items-center justify-between bg-amber-500/10 border border-amber-500/30 p-2.5 rounded-lg text-xs animate-fade-in"
+                            >
+                              <div className="font-black text-amber-200 flex items-center gap-2">
+                                <span className="bg-amber-500 text-slate-950 font-black px-1.5 py-0.5 rounded text-[9px] uppercase">
+                                  CUPÓN #{idx + 1}
+                                </span>
+                                {winner.nombreCompleto}
+                              </div>
+                              <span className="text-[10px] text-slate-400 font-mono">
+                                {winner.documento}
+                              </span>
+                            </div>
+                          ))
+                        ) : (
+                          <div className="text-center py-6 text-slate-600 text-xs border border-dashed border-slate-800 rounded-xl">
+                            Aún no hay ganadores. ¡Gira la ruleta en directo!
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* CANDIDATOS RESTANTES EN LA RULETA */}
+                    <div className="pt-4 border-t border-slate-800/60">
+                      <span className="text-[10px] font-black tracking-widest text-slate-400 uppercase block mb-2">
+                        👥 CANDIDATOS RESTANTES ({sorteoCandidates.length})
+                      </span>
+                      <div className="space-y-1.5 max-h-[140px] overflow-y-auto pr-1">
+                        {sorteoCandidates.map((p, idx) => (
+                          <div 
+                            key={p.id || idx}
+                            className="flex items-center justify-between bg-slate-950/40 border border-slate-800/50 p-2 rounded-lg text-xs text-slate-300"
+                          >
+                            <span className="font-semibold truncate max-w-[180px]">{p.nombreCompleto}</span>
+                            <span className="text-[10px] text-slate-500 font-mono">{p.documento}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div>
+                    {/* Pantalla estándar de Bombo General */}
+                    <h4 className="font-black text-white border-b border-slate-800 pb-3 uppercase tracking-wider text-sm flex items-center gap-2">
+                      <Award className={`w-4.5 h-4.5 ${activeBrandStyles.textAccent}`} />
+                      Bombo de Participantes ({roulettePool.length})
+                    </h4>
+                    
+                    <p className="text-xs text-slate-400 my-3">
+                      Solo las personas registradas en el torneo seleccionado ingresarán al sorteo dinámico actual.
+                    </p>
+
+                    {/* Botón de Llamado a la Acción para iniciar sorteo */}
+                    <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-4 text-center my-4 animate-fade-in">
+                      <Sparkles className={`w-8 h-8 mx-auto mb-2 ${activeBrandStyles.textAccent} animate-pulse`} />
+                      <h5 className="text-xs font-black text-white uppercase tracking-wider">Modo Sorteo Especial sin Repeticiones</h5>
+                      <p className="text-[11px] text-slate-400 mt-1 mb-3.5 leading-normal">
+                        Cada participante ganador se retira de la ruleta automáticamente para evitar repeticiones. Al finalizar se pueden reintegrar.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={handleStartSorteoSession}
+                        className={`w-full py-2.5 rounded-lg text-xs font-black uppercase tracking-wider text-slate-950 bg-gradient-to-r ${activeBrandStyles.gradient} ${activeBrandStyles.hoverGradient} shadow-md transition-all duration-300 hover:scale-[1.01]`}
+                      >
+                        🚀 Iniciar Sorteo Especial
+                      </button>
+                    </div>
+
+                    <div className="space-y-2 max-h-[220px] overflow-y-auto pr-1">
+                      {roulettePool.length > 0 ? (
+                        roulettePool.map((p, idx) => (
+                          <div 
+                            key={p.id || idx} 
+                            className="flex items-center justify-between bg-slate-950/60 p-3 rounded-lg border border-slate-800/80 text-xs animate-fade-in"
+                          >
+                            <div className="font-bold text-slate-200">{p.nombreCompleto}</div>
+                            <div className={`text-[10px] uppercase font-semibold px-2.5 py-0.5 rounded border font-mono tracking-wider ${activeBrandStyles.textAccent} ${activeBrandStyles.bgAccentLight} ${activeBrandStyles.borderAccentLight}`}>
+                              {p.documento}
+                            </div>
+                          </div>
+                        ))
+                      ) : (
+                        <div className="text-center py-10 text-slate-500 text-xs border-2 border-dashed border-slate-800 rounded-xl">
+                          ⚠️ No hay nadie registrado en este evento aún.
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
 
+              {/* Pie de controles adaptativos */}
               <div className="pt-6 border-t border-slate-800 mt-6 bg-slate-950/25 p-4 rounded-xl">
-                <h5 className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-1.5">Instrucciones de Pantalla</h5>
-                <ul className="text-[11px] text-slate-400 space-y-1.5 list-disc pl-4">
-                  <li>Elige el evento para cambiar de marca de forma instantánea.</li>
-                  <li>Puedes proyectar este sistema en transmisiones en directo o pantallas de tarima.</li>
-                </ul>
+                {sorteoActive ? (
+                  <div className="space-y-2">
+                    <p className="text-[10px] text-slate-400 leading-normal mb-2">
+                      Al finalizar, los ganadores serán liberados del bombo de exclusión de esta sesión del navegador.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={handleFinishSorteoSession}
+                      className="w-full bg-rose-950/40 hover:bg-rose-900/50 border border-rose-900/50 text-rose-400 font-bold text-xs py-2.5 rounded-lg uppercase tracking-wider transition duration-300"
+                    >
+                      🛑 Finalizar y Resetear Sorteo
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <h5 className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-1.5">Instrucciones de Pantalla</h5>
+                    <ul className="text-[11px] text-slate-400 space-y-1.5 list-disc pl-4">
+                      <li>Elige el evento para cambiar de marca de forma instantánea.</li>
+                      <li>Puedes proyectar este sistema en transmisiones en directo o pantallas de tarima.</li>
+                    </ul>
+                  </>
+                )}
               </div>
             </div>
           </div>
@@ -2312,7 +2492,7 @@ export default function App() {
                       <span className={`px-2.5 py-0.5 rounded text-[10px] font-bold ${
                         sponsor.vinculacion === 'all' || !sponsor.vinculacion
                           ? 'bg-emerald-950/20 text-emerald-400 border border-emerald-900/40'
-                          : 'bg-sky-950/20 text-sky-400 border border-sky-900/40'
+                          : 'bg-sky-950/20 text-sky-400 border-sky-900/40'
                       }`}>
                         {sponsor.vinculacion === 'all' || !sponsor.vinculacion ? '🌐 Global (Todos los eventos)' : `🎯 Específico (${sponsor.eventosIds?.length || 0} Eventos)`}
                       </span>
@@ -2357,7 +2537,7 @@ export default function App() {
   
       </main>
 
-      {/* MODAL 1: Autenticación de Organizador (Sin claves expuestas ni placeholders predictivos) */}
+      {/* MODAL 1: Autenticación de Organizador */}
       {showPinModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4 animate-fade-in">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-6 shadow-2xl">
@@ -2503,7 +2683,7 @@ export default function App() {
         </div>
       )}
 
-      {/* MODAL 5: Eliminar Marca Aliada (Verificación antes de borrar) */}
+      {/* MODAL 5: Eliminar Marca Aliada */}
       {deleteSponsorTarget && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4 animate-fade-in">
           <div className="bg-slate-900 border border-slate-800 rounded-xl max-w-sm w-full p-6 shadow-2xl">
@@ -2534,7 +2714,7 @@ export default function App() {
         </div>
       )}
 
-      {/* MODAL: Marcas Aliadas en Registro (Muestra de forma exclusiva las marcas asociadas al evento actual) */}
+      {/* MODAL: Marcas Aliadas en Registro */}
       {showSponsorsModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/90 backdrop-blur-md p-4 animate-fade-in">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full p-6 shadow-2xl relative overflow-hidden">

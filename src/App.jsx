@@ -787,13 +787,18 @@ export default function App() {
     setDeleteTargetName(name);
   };
 
+  // --- EXCELENTE MEJORA: ACTUALIZACIÓN REACTIVA INSTANTÁNEA AL ELIMINAR ---
   const confirmDeleteParticipant = async () => {
     if (!deleteTargetId) return;
     try {
       const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'registrados', deleteTargetId);
       await deleteDoc(docRef);
+      
+      // Actualizar inmediatamente el estado local del Admin para que desaparezca sin forzar un "Sincronizar"
+      setParticipants(prev => prev.filter(p => p.id !== deleteTargetId));
+
       playBeep(300, 0.2);
-      triggerNotification('success', 'Participante eliminado.');
+      triggerNotification('success', 'Participante eliminado de forma permanente.');
       
       // Eliminar también de las listas locales del sorteo si corresponde
       if (sorteoActive) {
@@ -801,7 +806,8 @@ export default function App() {
         setSorteoWinners(prev => prev.filter(p => p.id !== deleteTargetId));
       }
     } catch (error) {
-      triggerNotification('error', 'No se pudo eliminar el registro.');
+      console.error("Error al borrar participante: ", error);
+      triggerNotification('error', 'No se pudo eliminar el registro en la nube.');
     } finally {
       setDeleteTargetId(null);
       setDeleteTargetName('');
@@ -1164,7 +1170,7 @@ export default function App() {
     playConfettiBeeps();
     setCyclingName('');
 
-    // --- MEJORA B: PERSISTENCIA DEL GANADOR EN FIRESTORE EN TIEMPO REAL ---
+    // --- PERSISTENCIA DEL GANADOR EN FIRESTORE EN TIEMPO REAL ---
     if (sorteoActive) {
       try {
         const progressDocId = `winner_${chosenWinner.id}_${Date.now()}`;
@@ -1382,7 +1388,6 @@ export default function App() {
               </button>
 
               {isAdminAuthenticated ? (
-                // Ajuste solicitado: Fondo dinámico y texto blanco con punto de pulso blanco
                 <div className={`hidden sm:flex items-center gap-2 px-4 py-2 rounded-full text-xs font-bold border transition-colors ${activeBrand === 'sport' ? 'bg-cyan-600 text-white border-cyan-500' : 'bg-red-600 text-white border-red-500'}`}>
                   <span className="w-2 h-2 rounded-full animate-pulse bg-white"></span>
                   Admin Activado

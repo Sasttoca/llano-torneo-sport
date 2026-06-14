@@ -1632,7 +1632,7 @@ export default function App() {
                     ? 'Procesando...' 
                     : allSponsorsFollowed 
                       ? 'Confirmar Registro' 
-                      : 'Visita los Patrocinadores'
+                      : 'Sigue a los Patrocinadores'
                   }
                 </button>
               </form>

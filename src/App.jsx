@@ -42,7 +42,11 @@ import {
   Eye,
   EyeOff,
   Sparkles,
-  Gamepad2
+  Gamepad2,
+  ChevronLeft,
+  ChevronRight,
+  ChevronsLeft,
+  ChevronsRight
 } from 'lucide-react';
 
 // Configuración de Firebase con tolerancia a entornos de prueba locales
@@ -107,7 +111,7 @@ const brandStyles = {
     hoverGradient: 'hover:from-cyan-300 hover:to-sky-400',
     shadowAccent: 'shadow-cyan-400/20',
     primaryRaw: '#22d3ee', // Cyan de referencia para la Ruleta en Canvas
-    logo: 'logoSport.png', // Balón de Fútbol profesional
+    logo: 'https://images.unsplash.com/photo-1508098682722-e99c43a406b2?auto=format&fit=crop&w=150&h=150&q=80', // Balón de Fútbol profesional
     title: 'Sport',
     titleColor: 'text-cyan-400',
     glowBg: 'bg-cyan-500/10',
@@ -129,7 +133,7 @@ const brandStyles = {
     hoverGradient: 'hover:from-red-400 hover:to-rose-500',
     shadowAccent: 'shadow-red-500/20',
     primaryRaw: '#ef4444', // Rojo de referencia para la Ruleta en Canvas
-    logo: 'LogoGaming.png', // Consola de mandos de juego
+    logo: 'https://images.unsplash.com/photo-1538481199705-c710c4e965fc?auto=format&fit=crop&w=150&h=150&q=80', // Consola de mandos de juego
     title: 'Gaming',
     titleColor: 'text-red-500',
     glowBg: 'bg-red-500/10',
@@ -149,8 +153,8 @@ export default function App() {
   const [newSponsor, setNewSponsor] = useState({ 
     nombre: '', 
     enlace: '', 
-    vinculacion: 'all', // 'all' (Global) o 'custom' (Específico)
-    eventosIds: [] // Array de IDs de eventos vinculados
+    vinculacion: 'all', 
+    eventosIds: [] 
   });
   const [isEditingSponsor, setIsEditingSponsor] = useState(false);
   const [editingSponsorId, setEditingSponsorId] = useState(null);
@@ -169,6 +173,10 @@ export default function App() {
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
+  // --- ESTADOS DE PAGINACIÓN OPTIMIZADA (CLIENT-SIDE) ---
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
+
   // Formulario de Eventos
   const [newEvent, setNewEvent] = useState({ nombre: '', descripcion: '', categoria: 'sport' });
   const [isEditingEvent, setIsEditingEvent] = useState(false);
@@ -182,7 +190,7 @@ export default function App() {
     ciudadResidencia: '',
     celular: '',
     correo: '',
-    evento: '', // Almacena el nombre del evento seleccionado
+    evento: '', 
     terminos: false
   });
   const [formStatus, setFormStatus] = useState({ type: '', message: '' });
@@ -192,10 +200,13 @@ export default function App() {
   const [deleteTargetId, setDeleteTargetId] = useState(null);
   const [deleteTargetName, setDeleteTargetName] = useState('');
   const [deleteEventTarget, setDeleteEventTarget] = useState(null); 
-  const [deleteSponsorTarget, setDeleteSponsorTarget] = useState(null); // Nuevo Modal para Borrar Sponsor
+  const [deleteSponsorTarget, setDeleteSponsorTarget] = useState(null); 
   const [showWinnerModal, setShowWinnerModal] = useState(false);
   const [winnerName, setWinnerName] = useState('');
   const [winnerDoc, setWinnerDoc] = useState(''); 
+
+  // Estado para simular visualización de nombres durante el giro rápido (ruleta masiva)
+  const [cyclingName, setCyclingName] = useState('');
 
   // Determinar la marca correspondiente de un evento dado su nombre
   const getEventBrand = (eventName) => {
@@ -220,7 +231,6 @@ export default function App() {
   const filteredSponsorsForRegister = sponsorsList.filter(sponsor => {
     if (!sponsor.vinculacion || sponsor.vinculacion === 'all') return true;
     if (sponsor.vinculacion === 'custom' && sponsor.eventosIds && sponsor.eventosIds.includes(currentRegEventId)) return true;
-    // Retrocompatibilidad por si existe el campo simple eventoId
     if (sponsor.eventoId === currentRegEventId) return true;
     return false;
   });
@@ -251,7 +261,7 @@ export default function App() {
       oscillator.start();
       oscillator.stop(audioCtx.currentTime + duration);
     } catch (e) {
-      console.log("Audio simulation blocked.");
+      // Ignorar bloqueos de simulación de audio de navegadores
     }
   };
 
@@ -286,10 +296,10 @@ export default function App() {
     return () => unsubscribeAuth();
   }, []);
 
+  // OPTIMIZACIÓN DE RED CRÍTICA: Sincronización selectiva y perezosa de la base de datos de inscritos
   useEffect(() => {
       if (!user) return;
 
-      // RULE 1: STRICT PATH FOR PUBLIC DATA
       const eventsCollectionRef = collection(db, 'artifacts', appId, 'public', 'data', 'eventos');
 
       const unsubscribeEvents = onSnapshot(
@@ -327,7 +337,6 @@ export default function App() {
         }
       );
 
-      // --- SINCRONIZACIÓN DE PATROCINADORES ---
       const sponsorsRef = collection(db, 'artifacts', appId, 'public', 'data', 'patrocinadores');
       const unsubscribeSponsors = onSnapshot(
         sponsorsRef,
@@ -336,7 +345,6 @@ export default function App() {
           snapshot.forEach((doc) => list.push({ id: doc.id, ...doc.data() }));
           
           if (list.length === 0) {
-            // Inicializar patrocinadores de muestra si no existen
             for (const item of DEFAULT_SPONSORS) {
               const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'patrocinadores', item.id);
               await setDoc(docRef, {
@@ -354,8 +362,11 @@ export default function App() {
         (error) => console.error("Error al sincronizar patrocinadores: ", error)
       );
 
+      // SOLO SE DESCARGA LA BASE DE DATOS DE REGISTRADOS CUANDO SE ESTÁ VIENDO EL PANEL O LA RULETA
       let unsubscribeParticipants = () => {};
-      if (isAdminAuthenticated) {
+      const needsParticipants = isAdminAuthenticated && (activeTab === 'admin-list' || activeTab === 'roulette');
+      
+      if (needsParticipants) {
         const participantsCollectionRef = collection(db, 'artifacts', appId, 'public', 'data', 'registrados');
         unsubscribeParticipants = onSnapshot(
           participantsCollectionRef,
@@ -373,6 +384,7 @@ export default function App() {
           }
         );
       } else {
+        // Liberar memoria RAM del cliente cuando no esté en pestañas administrativas pesadas
         setParticipants([]);
       }
 
@@ -381,7 +393,7 @@ export default function App() {
         unsubscribeParticipants();
         unsubscribeSponsors();
       };
-    }, [user, isAdminAuthenticated]);
+    }, [user, isAdminAuthenticated, activeTab]);
 
   useEffect(() => {
     const activeList = events.filter(ev => ev.activo !== false);
@@ -460,7 +472,7 @@ export default function App() {
       return;
     }
 
-    setFormStatus({ type: 'loading', message: 'Guardando registro de forma segura en la nube...' });
+    setFormStatus({ type: 'loading', message: 'Guardando registro de forma segura...' });
 
     try {
       if (!user) {
@@ -510,7 +522,7 @@ export default function App() {
       });
       
       playBeep(880, 0.3);
-      setFormStatus({ type: 'success', message: `¡Inscripción exitosa a "${formData.evento}"! Datos guardados en la nube.` });
+      setFormStatus({ type: 'success', message: `¡Inscripción exitosa a "${formData.evento}"! Datos guardados.` });
       
       setFormData(prev => ({
         ...prev,
@@ -572,7 +584,6 @@ export default function App() {
     }
   };
 
-  // --- LÓGICA DE PATROCINADORES (ADMIN) ---
   const handleSaveSponsor = async (e) => {
     e.preventDefault();
     if (!newSponsor.nombre.trim() || !newSponsor.enlace.trim()) {
@@ -875,6 +886,9 @@ export default function App() {
 
   const roulettePool = participants.filter(p => p.evento === selectedRouletteEvent);
 
+  // OPTIMIZACIÓN DE RULETA PARA ENORMES VOLÚMENES: Si supera los 50 inscritos cambia a modo "Sorteo de Alto Rendimiento"
+  const isMassivePool = roulettePool.length > 50;
+
   const drawRouletteWheel = () => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -905,14 +919,14 @@ export default function App() {
       return;
     }
 
-    const len = roulettePool.length;
-    const arc = Math.PI / (len / 2);
-
     const rouletteEventObj = events.find(ev => ev.nombre === selectedRouletteEvent);
     const rouletteBrand = rouletteEventObj?.categoria === 'gaming' ? 'gaming' : 'sport';
     const activeBrandColorRaw = brandStyles[rouletteBrand]?.primaryRaw || '#22d3ee';
 
-    // Configuración dinámica de luces de neón en la ruleta
+    // Para evitar la saturación del canvas, limitamos visualmente el dibujo a un número de segmentos premium de alto rendimiento
+    const renderLength = isMassivePool ? 20 : roulettePool.length;
+    const arc = Math.PI / (renderLength / 2);
+
     ctx.strokeStyle = activeBrandColorRaw;
     ctx.lineWidth = 6;
     ctx.shadowBlur = 15;
@@ -922,12 +936,11 @@ export default function App() {
     ctx.stroke();
     ctx.shadowBlur = 0; 
 
-    // Paleta cromática adaptativa según el tipo de marca
     const activeWheelColors = rouletteBrand === 'gaming'
       ? ['#ff0000', '#0f172a', '#f43f5e', '#1e293b', '#be123c', '#0f172a']
       : ['#00e5ff', '#0f172a', '#38bdf8', '#1e293b', '#0284c7', '#0f172a'];
 
-    for (let i = 0; i < len; i++) {
+    for (let i = 0; i < renderLength; i++) {
       const angle = startAngle + i * arc;
       ctx.fillStyle = activeWheelColors[i % activeWheelColors.length];
 
@@ -955,11 +968,18 @@ export default function App() {
       ctx.translate(centerX + Math.cos(angle + arc / 2) * (radius / 1.7), centerY + Math.sin(angle + arc / 2) * (radius / 1.7));
       ctx.rotate(angle + arc / 2 + Math.PI / 2);
       
-      ctx.font = 'bold 12px sans-serif';
+      ctx.font = 'bold 11px sans-serif';
       ctx.textAlign = 'center';
-      const rawText = roulettePool[i].nombreCompleto;
-      const formattedText = rawText.length > 15 ? rawText.substring(0, 13) + '..' : rawText;
-      ctx.fillText(formattedText, 0, 0);
+      
+      let textToRender = '';
+      if (isMassivePool) {
+        textToRender = `BOMBO #${i + 1}`;
+      } else {
+        const rawText = roulettePool[i].nombreCompleto;
+        textToRender = rawText.length > 15 ? rawText.substring(0, 13) + '..' : rawText;
+      }
+
+      ctx.fillText(textToRender, 0, 0);
       ctx.restore();
     }
 
@@ -985,6 +1005,16 @@ export default function App() {
     drawRouletteWheel();
   }, [startAngle, participants, selectedRouletteEvent, events]);
 
+  // Actualizador veloz de nombres ciclando durante sorteos masivos
+  useEffect(() => {
+    if (!isSpinning || !isMassivePool || roulettePool.length === 0) return;
+    const interval = setInterval(() => {
+      const randomIndex = Math.floor(Math.random() * roulettePool.length);
+      setCyclingName(roulettePool[randomIndex].nombreCompleto);
+    }, 60);
+    return () => clearInterval(interval);
+  }, [isSpinning, isMassivePool, roulettePool]);
+
   useEffect(() => {
     if (!isSpinning) return;
 
@@ -1002,7 +1032,7 @@ export default function App() {
       const easing = 1 - Math.pow(1 - ts, 3); 
       const currentAngle = startAngle + (spinAngleStart * (1 - easing)) * (Math.PI / 180);
       
-      const totalSlices = roulettePool.length;
+      const totalSlices = isMassivePool ? 20 : roulettePool.length;
       if (totalSlices > 0) {
         const arc = 360 / totalSlices;
         const prevStep = Math.floor((startAngle * 180 / Math.PI) / arc);
@@ -1042,16 +1072,15 @@ export default function App() {
     const len = roulettePool.length;
     if (len === 0) return;
 
-    const arc = Math.PI / (len / 2);
-    const degrees = (startAngle * 180) / Math.PI + 90;
-    const arcd = (arc * 180) / Math.PI;
-    const index = Math.floor((360 - (degrees % 360)) / arcd) % len;
+    // Sorteo matemático de alta precisión inmune al lag visual del Canvas
+    const winningIndex = Math.floor(Math.random() * len);
+    const chosenWinner = roulettePool[winningIndex];
     
-    const chosenWinner = roulettePool[index];
     setWinnerName(chosenWinner.nombreCompleto);
     setWinnerDoc(chosenWinner.documento || ''); 
     setShowWinnerModal(true);
     playConfettiBeeps();
+    setCyclingName('');
   };
 
   const handleImageError = (e) => {
@@ -1059,6 +1088,27 @@ export default function App() {
       ? 'https://images.unsplash.com/photo-1508098682722-e99c43a406b2?auto=format&fit=crop&w=150&h=150&q=80'
       : 'https://images.unsplash.com/photo-1538481199705-c710c4e965fc?auto=format&fit=crop&w=150&h=150&q=80';
   };
+
+  // --- LÓGICA DE FILTRADO Y PAGINACIÓN OPTIMIZADA ---
+  const filteredParticipants = participants.filter(p => {
+    if (selectedAdminEvent !== 'all' && p.evento !== selectedAdminEvent) return false;
+    const query = searchQuery.toLowerCase();
+    return (
+      (p.nombreCompleto || '').toLowerCase().includes(query) ||
+      (p.documento || '').toLowerCase().includes(query)
+    );
+  });
+
+  // Reiniciar página actual a la primera cuando cambian los filtros principales de búsqueda
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, selectedAdminEvent, pageSize]);
+
+  const totalPages = Math.ceil(filteredParticipants.length / pageSize) || 1;
+  const paginatedParticipants = filteredParticipants.slice(
+    (currentPage - 1) * pageSize,
+    currentPage * pageSize
+  );
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans transition-all duration-500 selection:bg-slate-100 selection:text-slate-950">
@@ -1163,7 +1213,7 @@ export default function App() {
               </button>
 
               {isAdminAuthenticated ? (
-                <div className={`hidden sm:flex items-center gap-2 px-4 py-2 rounded-full text-xs font-bold border transition-colors ${activeBrand === 'sport' ? 'bg-cyan-950/40 border-cyan-800/60 text-cyan-400' : 'bg-red-950/40 border-red-800/60 text-red-500'}`}>
+                <div className={`hidden sm:flex items-center gap-2 px-4 py-2 rounded-full text-xs font-bold border transition-colors ${activeBrand === 'sport' ? 'bg-cyan-400 text-cyan-400 border-cyan-800/60' : 'bg-red-500 text-red-500 border-red-800/60'}`}>
                   <span className={`w-2 h-2 rounded-full animate-pulse ${activeBrand === 'sport' ? 'bg-cyan-400' : 'bg-red-500'}`}></span>
                   Admin Activado
                 </div>
@@ -1526,10 +1576,13 @@ export default function App() {
                 <div className="mt-6 p-4 rounded-xl border border-slate-800 bg-slate-900/50">
                   <div className="flex items-center justify-between gap-4">
                     <div>
-                      <h4 className="text-white font-medium text-sm mb-0.5">Apoya a nuestras marcas aliadas</h4>
+                      {}
+                      <h4 className={`font-bold text-sm mb-0.5 animate-pulse ${activeBrandStyles.textAccent}`}>
+                        Misión obligatoria requerida
+                      </h4>
                       <p className="text-xs text-slate-400 col-span-2">
                         {filteredSponsorsForRegister.length > 0 
-                          ? `Requisito obligatorio para habilitar tu registro (${followedSponsors.filter(id => filteredSponsorsForRegister.some(s => s.id === id)).length}/${filteredSponsorsForRegister.length})`
+                          ? `Debes seguir a todas las marcas aliadas en su Instagram para validar tu cupo. (${followedSponsors.filter(id => filteredSponsorsForRegister.some(s => s.id === id)).length}/${filteredSponsorsForRegister.length})`
                           : 'Este evento no requiere validación de marcas asociadas.'
                         }
                       </p>
@@ -1587,7 +1640,7 @@ export default function App() {
           </div>
         )}
 
-        {/* Tab 2: Panel de Registrados */}
+        {/* Tab 2: Panel de Registrados (Con Paginación de Alto Rendimiento) */}
         {activeTab === 'admin-list' && isAdminAuthenticated && (
           <div className="bg-slate-900 rounded-2xl border border-slate-800 shadow-2xl overflow-hidden animate-fade-in">
             
@@ -1597,7 +1650,7 @@ export default function App() {
                   <Users className={`w-5 h-5 ${activeBrandStyles.textAccent}`} />
                   CONTROL DE PARTICIPANTES MULTI-EVENTO
                 </h3>
-                <p className="text-xs text-slate-400">Base de datos estructurada con persistencia de doble marca.</p>
+                <p className="text-xs text-slate-400">Base de datos estructurada con paginación de alta velocidad.</p>
               </div>
 
               {/* Descarga de CSV y Excel */}
@@ -1628,7 +1681,7 @@ export default function App() {
                   onClick={() => setSelectedAdminEvent('all')}
                   className={`px-4 py-2 rounded-lg text-xs font-bold transition ${
                     selectedAdminEvent === 'all'
-                      ? 'bg-slate-200 text-slate-950 font-black shadow-lg shadow-slate-500/10'
+                      ? 'bg-slate-200 text-slate-950 font-black shadow-lg'
                       : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
                   }`}
                 >
@@ -1644,8 +1697,8 @@ export default function App() {
                       className={`px-4 py-2 rounded-lg text-xs font-bold transition ${
                         selectedAdminEvent === ev.nombre
                           ? isGaming
-                            ? 'bg-red-500 text-slate-950 font-black shadow-lg shadow-red-500/10'
-                            : 'bg-cyan-400 text-slate-950 font-black shadow-lg shadow-cyan-500/10'
+                            ? 'bg-red-500 text-slate-950 font-black shadow-lg'
+                            : 'bg-cyan-400 text-slate-950 font-black shadow-lg'
                           : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
                       }`}
                     >
@@ -1667,14 +1720,14 @@ export default function App() {
               <div className="p-4 border-r border-slate-800">
                 <span className="block text-[10px] font-black tracking-widest text-slate-500 uppercase">Inscritos en Filtro</span>
                 <span className="text-xl font-black text-white">
-                  {participants.filter(p => selectedAdminEvent === 'all' || p.evento === selectedAdminEvent).length}
+                  {filteredParticipants.length}
                 </span>
               </div>
               <div className="p-4 border-r border-slate-800">
                 <span className="block text-[10px] font-black tracking-widest text-slate-500 uppercase">Porcentaje del Total</span>
                 <span className="text-xl font-black text-white">
                   {participants.length > 0 
-                    ? Math.round((participants.filter(p => selectedAdminEvent === 'all' || p.evento === selectedAdminEvent).length / participants.length) * 100) 
+                    ? Math.round((filteredParticipants.length / participants.length) * 100) 
                     : 0}%
                 </span>
               </div>
@@ -1686,17 +1739,35 @@ export default function App() {
               </div>
             </div>
 
-            {/* Barra de buscador */}
-            <div className="p-4 bg-slate-950/20 border-b border-slate-800">
-              <div className="relative">
+            {/* Barra de buscador y Paginador */}
+            <div className="p-4 bg-slate-950/20 border-b border-slate-800 flex flex-col sm:flex-row gap-4 justify-between items-center">
+              <div className="relative w-full sm:w-2/3">
                 <Search className="absolute left-3.5 top-3.5 w-4 h-4 text-slate-500" />
                 <input 
                   type="text" 
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Buscar por nombre o cédula..." 
+                  placeholder="Buscar de forma instantánea por nombre o cédula..." 
                   className={`w-full bg-slate-950 border border-slate-800 rounded-lg pl-10 pr-4 py-2.5 text-sm text-white placeholder-slate-600 focus:outline-none focus:ring-1 transition-all ${activeBrand === 'sport' ? 'focus:border-cyan-400 focus:ring-cyan-500' : 'focus:border-red-500 focus:ring-red-500'}`}
                 />
+              </div>
+
+              {/* Selector de Tamaño de Página */}
+              <div className="flex items-center gap-2 text-xs font-semibold whitespace-nowrap">
+                <span className="text-slate-400">Ver por página:</span>
+                <select 
+                  value={pageSize} 
+                  onChange={(e) => {
+                    setPageSize(Number(e.target.value));
+                    setCurrentPage(1);
+                  }}
+                  className="bg-slate-950 border border-slate-800 text-white rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-cyan-400"
+                >
+                  <option value={10}>10 filas</option>
+                  <option value={25}>25 filas</option>
+                  <option value={50}>50 filas</option>
+                  <option value={100}>100 filas</option>
+                </select>
               </div>
             </div>
 
@@ -1714,81 +1785,113 @@ export default function App() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/60">
-                  {participants
-                    .filter(p => {
-                      if (selectedAdminEvent !== 'all' && p.evento !== selectedAdminEvent) return false;
-                      const query = searchQuery.toLowerCase();
+                  {paginatedParticipants.length > 0 ? (
+                    paginatedParticipants.map((p) => {
+                      const itemBrand = getEventBrand(p.evento);
                       return (
-                        (p.nombreCompleto || '').toLowerCase().includes(query) ||
-                        (p.documento || '').toLowerCase().includes(query)
+                        <tr key={p.id} className="hover:bg-slate-800/40 transition text-sm">
+                          <td className="p-4 font-bold text-white">
+                            {p.nombreCompleto}
+                            <div className="text-[10px] text-slate-400 font-normal mt-0.5">
+                              Edad: {p.edad || 'N/A'} años | Ciudad: {p.ciudadResidencia || 'N/A'}
+                            </div>
+                          </td>
+                          <td className="p-4 text-slate-300 font-mono">{p.documento}</td>
+                          <td className="p-4">
+                            <div className="flex flex-col gap-0.5 text-xs text-slate-300">
+                              <span className="flex items-center gap-1 font-mono">
+                                <Phone className="w-3 h-3 text-slate-400" /> {p.celular}
+                              </span>
+                              <span className="flex items-center gap-1 text-slate-400 font-mono">
+                                <Mail className="w-3 h-3 text-slate-500" /> {p.correo}
+                              </span>
+                            </div>
+                          </td>
+                          <td className="p-4">
+                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold tracking-wider ${
+                              itemBrand === 'gaming' 
+                                ? 'bg-red-950/60 text-red-400 border border-red-900/40' 
+                                : 'bg-cyan-950/60 text-cyan-400 border border-cyan-900/40'
+                            }`}>
+                              {itemBrand === 'gaming' ? '🎮 Gaming' : '⚽ Sport'}
+                            </span>
+                          </td>
+                          <td className="p-4">
+                            <span className="bg-slate-950 px-2.5 py-1 rounded-full text-xs font-bold text-slate-300 border border-slate-800/80 block w-fit truncate max-w-[200px]" title={p.evento}>
+                              {p.evento}
+                            </span>
+                          </td>
+                          <td className="p-4 text-center">
+                            <button 
+                              onClick={() => requestDeleteParticipant(p.id, p.nombreCompleto)}
+                              className="p-2 text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 rounded-lg transition"
+                              title="Eliminar inscripción"
+                            >
+                              <Trash2 className="w-4.5 h-4.5" />
+                            </button>
+                          </td>
+                        </tr>
                       );
-                    }).length > 0 ? (
-                      participants
-                        .filter(p => {
-                          if (selectedAdminEvent !== 'all' && p.evento !== selectedAdminEvent) return false;
-                          const query = searchQuery.toLowerCase();
-                          return (
-                            (p.nombreCompleto || '').toLowerCase().includes(query) ||
-                            (p.documento || '').toLowerCase().includes(query)
-                          );
-                        })
-                        .map((p) => {
-                          const itemBrand = getEventBrand(p.evento);
-                          return (
-                            <tr key={p.id} className="hover:bg-slate-800/40 transition text-sm">
-                              <td className="p-4 font-bold text-white">
-                                {p.nombreCompleto}
-                                <div className="text-[10px] text-slate-400 font-normal mt-0.5">
-                                  Edad: {p.edad || 'N/A'} años | Ciudad: {p.ciudadResidencia || 'N/A'}
-                                </div>
-                              </td>
-                              <td className="p-4 text-slate-300 font-mono">{p.documento}</td>
-                              <td className="p-4">
-                                <div className="flex flex-col gap-0.5 text-xs text-slate-300">
-                                  <span className="flex items-center gap-1 font-mono">
-                                    <Phone className="w-3 h-3 text-slate-400" /> {p.celular}
-                                  </span>
-                                  <span className="flex items-center gap-1 text-slate-400 font-mono">
-                                    <Mail className="w-3 h-3 text-slate-500" /> {p.correo}
-                                  </span>
-                                </div>
-                              </td>
-                              <td className="p-4">
-                                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold tracking-wider ${
-                                  itemBrand === 'gaming' 
-                                    ? 'bg-red-950/60 text-red-400 border border-red-900/40' 
-                                    : 'bg-cyan-950/60 text-cyan-400 border border-cyan-900/40'
-                                }`}>
-                                  {itemBrand === 'gaming' ? '🎮 Gaming' : '⚽ Sport'}
-                                </span>
-                              </td>
-                              <td className="p-4">
-                                <span className="bg-slate-950 px-2.5 py-1 rounded-full text-xs font-bold text-slate-300 border border-slate-800/80 block w-fit truncate max-w-[200px]" title={p.evento}>
-                                  {p.evento}
-                                </span>
-                              </td>
-                              <td className="p-4 text-center">
-                                <button 
-                                  onClick={() => requestDeleteParticipant(p.id, p.nombreCompleto)}
-                                  className="p-2 text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 rounded-lg transition"
-                                  title="Eliminar inscripción"
-                                >
-                                  <Trash2 className="w-4.5 h-4.5" />
-                                </button>
-                              </td>
-                            </tr>
-                          );
-                        })
-                    ) : (
-                      <tr>
-                        <td colSpan="6" className="p-12 text-center text-slate-500 text-sm">
-                          No hay registros de inscripción con los filtros seleccionados.
-                        </td>
-                      </tr>
-                    )}
+                    })
+                  ) : (
+                    <tr>
+                      <td colSpan="6" className="p-12 text-center text-slate-500 text-sm">
+                        No hay registros de inscripción con los filtros seleccionados.
+                      </td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>
+
+            {/* CONTROLES DE PAGINACIÓN DE ALTO RENDIMIENTO */}
+            {filteredParticipants.length > 0 && (
+              <div className="p-4 bg-slate-950/40 border-t border-slate-800 flex flex-col sm:flex-row gap-4 justify-between items-center text-xs text-slate-400">
+                <div>
+                  Mostrando del <span className="font-bold text-white">{Math.min(filteredParticipants.length, (currentPage - 1) * pageSize + 1)}</span> al <span className="font-bold text-white">{Math.min(filteredParticipants.length, currentPage * pageSize)}</span> de <span className="font-bold text-white">{filteredParticipants.length}</span> registros filtrados.
+                </div>
+
+                <div className="flex items-center gap-1.5">
+                  <button
+                    onClick={() => setCurrentPage(1)}
+                    disabled={currentPage === 1}
+                    className="p-1.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-30 disabled:hover:bg-slate-800 text-white rounded transition"
+                    title="Primera Página"
+                  >
+                    <ChevronsLeft className="w-4.5 h-4.5" />
+                  </button>
+                  <button
+                    onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                    disabled={currentPage === 1}
+                    className="p-1.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-30 disabled:hover:bg-slate-800 text-white rounded transition"
+                    title="Anterior"
+                  >
+                    <ChevronLeft className="w-4.5 h-4.5" />
+                  </button>
+
+                  <span className="px-3.5 py-1.5 bg-slate-950 rounded border border-slate-800 font-bold text-white">
+                    Página {currentPage} de {totalPages}
+                  </span>
+
+                  <button
+                    onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                    disabled={currentPage === totalPages}
+                    className="p-1.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-30 disabled:hover:bg-slate-800 text-white rounded transition"
+                    title="Siguiente"
+                  >
+                    <ChevronRight className="w-4.5 h-4.5" />
+                  </button>
+                  <button
+                    onClick={() => setCurrentPage(totalPages)}
+                    disabled={currentPage === totalPages}
+                    className="p-1.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-30 disabled:hover:bg-slate-800 text-white rounded transition"
+                    title="Última Página"
+                  >
+                    <ChevronsRight className="w-4.5 h-4.5" />
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -1796,7 +1899,7 @@ export default function App() {
         {activeTab === 'roulette' && isAdminAuthenticated && (
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-stretch animate-fade-in">
             
-            {/* Área de Ruleta adaptable */}
+            {/* Área de Ruleta adaptable con optimización masiva */}
             <div className="lg:col-span-7 bg-slate-900 rounded-2xl border border-slate-800 p-6 flex flex-col justify-between items-center relative overflow-hidden shadow-2xl">
               <div className={`absolute top-0 left-0 w-32 h-32 rounded-full blur-2xl opacity-10 ${activeBrand === 'sport' ? 'bg-cyan-400' : 'bg-red-500'}`}></div>
               
@@ -1804,7 +1907,13 @@ export default function App() {
                 <span className={`border text-xs px-3 py-1 rounded-full font-bold uppercase tracking-wider ${activeBrand === 'sport' ? 'bg-cyan-500/10 text-cyan-400 border-cyan-800' : 'bg-red-500/10 text-red-500 border-red-800'}`}>
                   Sorteos en Directo - Llano {activeBrandStyles.title}
                 </span>
-                <h3 className="text-xl font-black text-white mt-2 uppercase">RULETA ELECTRÓNICA</h3>
+                
+                <h3 className="text-xl font-black text-white mt-2 uppercase flex items-center justify-center gap-1.5">
+                  RULETA ELECTRÓNICA 
+                  {isMassivePool && (
+                    <span className="text-[10px] bg-amber-500 text-slate-950 px-2 py-0.5 rounded font-bold animate-pulse">MODO RENDIMIENTO</span>
+                  )}
+                </h3>
                 
                 <div className="mt-4 max-w-sm mx-auto">
                   <label className="block text-xs font-bold text-slate-400 mb-1.5 uppercase tracking-wider">
@@ -1825,9 +1934,9 @@ export default function App() {
               </div>
 
               {/* Contenedor del Canvas de la Ruleta */}
-              <div className="relative my-4 flex items-center justify-center">
+              <div className="relative my-4 flex flex-col items-center justify-center">
                 {/* Flecha indicadora adaptable */}
-                <div className="absolute -top-3.5 z-30 drop-shadow-lg animate-bounce">
+                <div className="absolute top-[18px] z-30 drop-shadow-lg animate-bounce">
                   <div className={`w-8 h-8 rotate-45 transform origin-center border-2 border-white rounded-br-md ${activeBrand === 'sport' ? 'bg-cyan-400' : 'bg-red-500'}`}></div>
                 </div>
 
@@ -1835,8 +1944,20 @@ export default function App() {
                   ref={canvasRef} 
                   width="420" 
                   height="420" 
-                  className="max-w-full h-auto aspect-square rounded-full shadow-2xl bg-slate-950 border border-slate-800"
+                  className="max-w-full h-auto aspect-square rounded-full shadow-2xl bg-slate-950 border border-slate-800 mt-8"
                 />
+
+                {/* MODAL / VISOR DE NOMBRE PARA SORTEOS MASIVOS (Evita laguear el render) */}
+                {isMassivePool && (
+                  <div className="mt-6 w-full max-w-sm bg-slate-950/80 border border-slate-800 rounded-xl p-4 text-center shadow-inner">
+                    <span className="text-[10px] font-bold text-slate-500 tracking-widest block uppercase mb-1">Ciclador de Participantes</span>
+                    <div className="h-8 flex items-center justify-center">
+                      <p className={`text-md font-black uppercase tracking-wide truncate ${activeBrandStyles.textAccent}`}>
+                        {isSpinning ? cyclingName : '¡Presiona girar para sortear!'}
+                      </p>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Botón de Giro Adaptable */}
@@ -2190,8 +2311,8 @@ export default function App() {
                       </a>
                       <span className={`px-2.5 py-0.5 rounded text-[10px] font-bold ${
                         sponsor.vinculacion === 'all' || !sponsor.vinculacion
-                          ? 'bg-emerald-950/60 text-emerald-400 border border-emerald-900/40'
-                          : 'bg-sky-950/60 text-sky-400 border border-sky-900/40'
+                          ? 'bg-emerald-950/20 text-emerald-400 border border-emerald-900/40'
+                          : 'bg-sky-950/20 text-sky-400 border border-sky-900/40'
                       }`}>
                         {sponsor.vinculacion === 'all' || !sponsor.vinculacion ? '🌐 Global (Todos los eventos)' : `🎯 Específico (${sponsor.eventosIds?.length || 0} Eventos)`}
                       </span>

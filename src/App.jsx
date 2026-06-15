@@ -759,8 +759,8 @@ export default function App() {
 
   const handleAdminAuth = (e) => {
     e.preventDefault();
-    const cleanPin = adminPinInput.trim().toLowerCase();
-    if (cleanPin === 'Admintap98') {
+    const cleanPin = adminPinInput.trim();
+    if (cleanPin === 'Admintap98*') {
       setIsAdminAuthenticated(true);
       setShowPinModal(false);
       setAdminPinInput('');

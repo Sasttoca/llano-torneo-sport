@@ -51,7 +51,6 @@ import {
   RefreshCw
 } from 'lucide-react';
 
-// Configuración de Firebase con tolerancia a entornos de prueba locales
 const firebaseConfig = typeof __firebase_config !== 'undefined' 
   ? JSON.parse(__firebase_config) 
   : {
@@ -70,10 +69,10 @@ const db = getFirestore(app);
 
 // Eventos predeterminados con balance de categorías para la base de datos inicial
 const DEFAULT_EVENTS = [
-  { id: 'default-1', nombre: 'Sorteo de Bienvenida Llano Torneo Sport 2026', descripcion: 'Sorteo general para todos los nuevos participantes deportivos.', activo: true, categoria: 'sport' },
-  { id: 'default-2', nombre: 'Gran Sorteo Integración Deportiva', descripcion: 'Sorteo especial del torneo de integración de fútbol.', activo: true, categoria: 'sport' },
-  { id: 'default-3', nombre: 'Gran Campeonato EA Sports FC 26 - Llano Gaming', descripcion: 'Torneo virtual de fútbol para la consola de nueva generación.', activo: true, categoria: 'gaming' },
-  { id: 'default-4', nombre: 'Rifa de Clausura de Torneos Gaming', descripcion: 'Evento de cierre con increíbles premios para apasionados del gaming.', activo: true, categoria: 'gaming' }
+  { id: 'default-1', nombre: 'Sorteo de Bienvenida Llano Torneo Sport 2026', descripcion: 'Sorteo general para todos los nuevos participantes deportivos.', activo: true, categoria: 'sport', mensajeWhatsapp: '' },
+  { id: 'default-2', nombre: 'Gran Sorteo Integración Deportiva', descripcion: 'Sorteo especial del torneo de integración de fútbol.', activo: true, categoria: 'sport', mensajeWhatsapp: '' },
+  { id: 'default-3', nombre: 'Gran Campeonato EA Sports FC 26 - Llano Gaming', descripcion: 'Torneo virtual de fútbol para la consola de nueva generación.', activo: true, categoria: 'gaming', mensajeWhatsapp: '¡Ey! ¿Quién se echa un FC 26? Me acabo de inscribir al torneo de [Nombre del Evento]. Regístrese rápido aquí y jugamos: [Link]' },
+  { id: 'default-4', nombre: 'Rifa de Clausura de Torneos Gaming', descripcion: 'Evento de cierre con increíbles premios para apasionados del gaming.', activo: true, categoria: 'gaming', mensajeWhatsapp: '' }
 ];
 
 // Patrocinadores predeterminados para evitar bloqueos del sponsor-gate al iniciar por primera vez
@@ -185,12 +184,17 @@ export default function App() {
   const [sorteoWinners, setSorteoWinners] = useState([]);
   const [isSyncingSorteo, setIsSyncingSorteo] = useState(false);
 
+  // --- NUEVOS ESTADOS PARA VIRALIZACIÓN EN WHATSAPP ---
+  const [sharedOnWhatsapp, setSharedOnWhatsapp] = useState(false);
+  const [isWhatsappLoading, setIsWhatsappLoading] = useState(false);
+  const [whatsappSeconds, setWhatsappSeconds] = useState(0);
+
   // --- ESTADOS DE PAGINACIÓN OPTIMIZADA (CLIENT-SIDE) ---
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
 
   // Formulario de Eventos
-  const [newEvent, setNewEvent] = useState({ nombre: '', descripcion: '', categoria: 'sport' });
+  const [newEvent, setNewEvent] = useState({ nombre: '', descripcion: '', categoria: 'sport', mensajeWhatsapp: '' });
   const [isEditingEvent, setIsEditingEvent] = useState(false);
   const [editingEventId, setEditingEventId] = useState(null);
 
@@ -237,6 +241,12 @@ export default function App() {
   }
   const activeBrandStyles = brandStyles[activeBrand] || brandStyles.sport;
 
+  const handleImageError = (e) => {
+    e.target.src = activeBrand === 'sport' 
+      ? 'https://images.unsplash.com/photo-1508098682722-e99c43a406b2?auto=format&fit=crop&w=150&h=150&q=80'
+      : 'https://images.unsplash.com/photo-1538481199705-c710c4e965fc?auto=format&fit=crop&w=150&h=150&q=80';
+  };
+
   // Filtrar patrocinadores válidos según el evento elegido en el formulario de registro
   const currentRegEvent = events.find(ev => ev.nombre === formData.evento);
   const currentRegEventId = currentRegEvent?.id;
@@ -256,6 +266,51 @@ export default function App() {
     if (!followedSponsors.includes(id)) {
       setFollowedSponsors(prev => [...prev, id]);
     }
+  };
+
+  // Lógica para procesar la acción de compartir en WhatsApp y simular validación
+  const handleWhatsappShare = () => {
+    const targetEvent = events.find(ev => ev.nombre === formData.evento);
+    let rawTemplate = "";
+
+    // Verificar si el evento actual posee un mensaje personalizado de WhatsApp redactado por el administrador
+    if (targetEvent && targetEvent.mensajeWhatsapp && targetEvent.mensajeWhatsapp.trim() !== '') {
+      rawTemplate = targetEvent.mensajeWhatsapp;
+    } else {
+      // Mensaje de respaldo exacto solicitado por el cliente
+      rawTemplate = "¡Qué más! Mire que me registré a esto de [Nombre del Evento], se ve muy bueno. Le dejo el link por si se quiere apuntar de una vez: [Link]";
+    }
+
+    const eventName = targetEvent ? targetEvent.nombre : (formData.evento || 'Llano Torneo');
+    const registrationLink = window.location.origin;
+
+    // Procesar los marcadores dinámicos del mensaje
+    const customMessage = rawTemplate
+      .replace(/\[Nombre del Evento\]/g, eventName)
+      .replace(/\[Link\]/g, registrationLink);
+
+    const text = encodeURIComponent(customMessage);
+    const whatsappUrl = `https://api.whatsapp.com/send?text=${text}`;
+    
+    // Abrir ventana externa a WhatsApp
+    window.open(whatsappUrl, '_blank', 'noopener,noreferrer');
+    
+    // Iniciar simulación de cronómetro de auditoría (Guardrail psicológico)
+    setIsWhatsappLoading(true);
+    let secondsLeft = 5;
+    setWhatsappSeconds(secondsLeft);
+    
+    const interval = setInterval(() => {
+      secondsLeft -= 1;
+      setWhatsappSeconds(secondsLeft);
+      if (secondsLeft <= 0) {
+        clearInterval(interval);
+        setSharedOnWhatsapp(true);
+        setIsWhatsappLoading(false);
+        triggerNotification('success', '¡Enlace de invitación compartido! Misión de WhatsApp validada.');
+        playBeep(880, 0.25);
+      }
+    }, 1000);
   };
 
   const playBeep = (freq, duration) => {
@@ -331,7 +386,8 @@ export default function App() {
               descripcion: item.descripcion, 
               fechaCreado: Date.now(), 
               activo: true,
-              categoria: item.categoria
+              categoria: item.categoria,
+              mensajeWhatsapp: item.mensajeWhatsapp || ''
             });
           }
         } else {
@@ -472,6 +528,7 @@ export default function App() {
 
     if (name === 'evento') {
       setFollowedSponsors([]);
+      setSharedOnWhatsapp(false);
     }
 
     if (name === 'nombreCompleto' && type !== 'checkbox') {
@@ -502,6 +559,10 @@ export default function App() {
     }
     if (!formData.evento) {
       setFormStatus({ type: 'error', message: 'Por favor selecciona un evento válido.' });
+      return;
+    }
+    if (!sharedOnWhatsapp) {
+      setFormStatus({ type: 'error', message: 'Debes cumplir la misión obligatoria de compartir el evento en WhatsApp antes de registrarte.' });
       return;
     }
 
@@ -585,6 +646,7 @@ export default function App() {
       
       // Resetear el requisito de patrocinio obligatoriamente para soporte multiusuario en un mismo dispositivo
       setFollowedSponsors([]);
+      setSharedOnWhatsapp(false);
 
       setFormData(prev => ({
         ...prev,
@@ -615,6 +677,7 @@ export default function App() {
           nombre: newEvent.nombre.trim(),
           descripcion: newEvent.descripcion.trim() || 'Sin descripción',
           categoria: newEvent.categoria,
+          mensajeWhatsapp: newEvent.mensajeWhatsapp.trim(),
           fechaCreado: Date.now()
         }, { merge: true });
         
@@ -635,12 +698,13 @@ export default function App() {
           descripcion: newEvent.descripcion.trim() || 'Sin descripción',
           fechaCreado: Date.now(),
           activo: true,
-          categoria: newEvent.categoria
+          categoria: newEvent.categoria,
+          mensajeWhatsapp: newEvent.mensajeWhatsapp.trim()
         });
         playBeep(660, 0.2);
         triggerNotification('success', 'Nuevo evento creado correctamente.');
       }
-      setNewEvent({ nombre: '', descripcion: '', categoria: 'sport' });
+      setNewEvent({ nombre: '', descripcion: '', categoria: 'sport', mensajeWhatsapp: '' });
     } catch (error) {
       triggerNotification('error', 'Error al guardar el evento.');
     }
@@ -723,14 +787,14 @@ export default function App() {
   const handleStartEditEvent = (ev) => {
     setIsEditingEvent(true);
     setEditingEventId(ev.id);
-    setNewEvent({ nombre: ev.nombre, descripcion: ev.descripcion, categoria: ev.categoria || 'sport' });
+    setNewEvent({ nombre: ev.nombre, descripcion: ev.descripcion, categoria: ev.categoria || 'sport', mensajeWhatsapp: ev.mensajeWhatsapp || '' });
     playBeep(600, 0.15);
   };
 
   const handleCancelEditEvent = () => {
     setIsEditingEvent(false);
     setEditingEventId(null);
-    setNewEvent({ nombre: '', descripcion: '', categoria: 'sport' });
+    setNewEvent({ nombre: '', descripcion: '', categoria: 'sport', mensajeWhatsapp: '' });
     playBeep(440, 0.1);
   };
 
@@ -787,7 +851,6 @@ export default function App() {
     setDeleteTargetName(name);
   };
 
-  // --- EXCELENTE MEJORA: ACTUALIZACIÓN REACTIVA INSTANTÁNEA AL ELIMINAR ---
   const confirmDeleteParticipant = async () => {
     if (!deleteTargetId) return;
     try {
@@ -1258,12 +1321,6 @@ export default function App() {
     }
   };
 
-  const handleImageError = (e) => {
-    e.target.src = activeBrand === 'sport' 
-      ? 'https://images.unsplash.com/photo-1508098682722-e99c43a406b2?auto=format&fit=crop&w=150&h=150&q=80'
-      : 'https://images.unsplash.com/photo-1538481199705-c710c4e965fc?auto=format&fit=crop&w=150&h=150&q=80';
-  };
-
   // --- LÓGICA DE FILTRADO Y PAGINACIÓN OPTIMIZADA ---
   const filteredParticipants = participants.filter(p => {
     if (selectedAdminEvent !== 'all' && p.evento !== selectedAdminEvent) return false;
@@ -1273,11 +1330,6 @@ export default function App() {
       (p.documento || '').toLowerCase().includes(query)
     );
   });
-
-  // Reiniciar página actual a la primera cuando cambian los filtros principales de búsqueda
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [searchQuery, selectedAdminEvent, pageSize]);
 
   const totalPages = Math.ceil(filteredParticipants.length / pageSize) || 1;
   const paginatedParticipants = filteredParticipants.slice(
@@ -1488,22 +1540,7 @@ export default function App() {
         )}
       </header>
 
-      {/* Toast de Notificación */}
-      {notification && (
-        <div className={`fixed top-24 right-4 z-50 animate-bounce-in max-w-sm w-full bg-slate-900 border-l-4 p-4 rounded-r-lg shadow-2xl flex items-start gap-3 border-slate-800 ${activeBrand === 'sport' ? 'border-cyan-400' : 'border-red-500'}`}>
-          {notification.type === 'success' ? (
-            <CheckCircle className={`w-6 h-6 shrink-0 ${activeBrandStyles.textAccent}`} />
-          ) : (
-            <AlertCircle className="w-6 h-6 text-rose-500 shrink-0" />
-          )}
-          <div>
-            <p className="text-sm font-semibold text-white">Mensaje del Sistema</p>
-            <p className="text-xs text-slate-300">{notification.message}</p>
-          </div>
-        </div>
-      )}
-
-      {/* Contenedor Principal */}
+      {/* --- Tab 1: Formulario de Registro --- */}
       <main className="flex-grow max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
         
         {/* Widget de Servidor - Solo visible a Administradores */}
@@ -1747,31 +1784,72 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* --- REQUISITO DE PATROCINADORES (Sponsor Gate) --- */}
-                <div className="mt-6 p-4 rounded-xl border border-slate-800 bg-slate-900/50">
-                  <div className="flex items-center justify-between gap-4">
-                    <div>
-                      <h4 className={`font-bold text-sm mb-0.5 animate-pulse ${activeBrandStyles.textAccent}`}>
-                        Misión obligatoria requerida
-                      </h4>
-                      <p className="text-xs text-slate-400">
-                        {filteredSponsorsForRegister.length > 0 
-                          ? `Debes seguir a todas las marcas aliadas en su Instagram para validar tu cupo. (${followedSponsors.filter(id => filteredSponsorsForRegister.some(s => s.id === id)).length}/${filteredSponsorsForRegister.length})`
-                          : 'Este evento no requiere validación de marcas asociadas.'
-                        }
-                      </p>
+                {/* --- SECCIÓN PREMIUM: MISIONES DE VALIDACIÓN (Sponsor Gate & WhatsApp Viral) --- */}
+                <div className="mt-6 p-5 rounded-2xl border border-slate-800 bg-slate-950/60 space-y-4">
+                  <h4 className="text-xs font-black tracking-widest uppercase text-slate-400 flex items-center gap-1.5 mb-1">
+                    <Award className={`w-4.5 h-4.5 ${activeBrandStyles.textAccent}`} />
+                    Misiones obligatorias de validación
+                  </h4>
+
+                  {/* MISION 1: COMPARTIR EN WHATSAPP (Misión Viral Orgánica con Mensajes Flexibles y Únicos) */}
+                  <div className="p-3.5 rounded-xl border border-slate-800/80 bg-slate-900/40 flex items-center justify-between gap-4">
+                    <div className="flex items-center gap-3">
+                      <div className="p-2 bg-emerald-500/10 rounded-lg text-emerald-400 shrink-0">
+                        {/* SVG de WhatsApp de alta fidelidad */}
+                        <svg className="w-5 h-5 shrink-0" fill="currentColor" viewBox="0 0 24 24">
+                          <path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946C.06 5.348 5.397.01 11.968.01c3.182.001 6.176 1.24 8.426 3.49 2.25 2.25 3.486 5.246 3.484 8.425-.004 6.557-5.341 11.895-11.913 11.895-2.007-.001-3.98-.51-5.74-1.488L0 24zm6.59-4.846c1.6.95 3.111 1.459 4.807 1.46 5.482 0 9.944-4.461 9.947-9.943.001-2.654-1.034-5.148-2.915-7.031C16.59 1.758 14.1 1.72 11.97 1.72c-5.485 0-9.948 4.462-9.95 9.945-.001 1.81.474 3.58 1.378 5.111L2.43 21.687l5.217-1.373zm11.75-5.918c-.328-.164-1.94-.957-2.24-1.066-.3-.11-.518-.165-.736.164-.218.328-.846 1.066-1.037 1.285-.19.218-.382.245-.71.082-.328-.164-1.386-.51-2.64-1.449-.975-.87-1.633-1.944-1.824-2.272-.19-.328-.02-.505.145-.668.148-.148.328-.382.492-.574.164-.19.218-.328.328-.546.11-.218.055-.41-.027-.574-.082-.164-.736-1.776-1.009-2.43-.266-.64-.537-.552-.736-.552-.19 0-.41-.027-.628-.027s-.573.082-.873.41c-.3.328-1.146 1.12-1.146 2.733 0 1.613 1.173 3.17 1.337 3.388.164.218 2.31 3.528 5.596 4.952.78.339 1.39.541 1.867.692.784.25 1.5.214 2.065.13.63-.094 1.94-.793 2.213-1.558.273-.765.273-1.42.19-1.558-.083-.138-.3-.218-.628-.382z"/>
+                        </svg>
+                      </div>
+                      <div>
+                        <h5 className="text-xs font-bold text-white">Recomendar Torneo (WhatsApp)</h5>
+                        <p className="text-[10px] text-slate-400">Comparte la invitación a tus amigos para validar el registro.</p>
+                      </div>
+                    </div>
+                    
+                    {sharedOnWhatsapp ? (
+                      <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 shrink-0">
+                        <CheckCircle className="w-4.5 h-4.5" />
+                        <span className="text-[10px] font-bold uppercase tracking-wider">Listo</span>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={handleWhatsappShare}
+                        disabled={isWhatsappLoading}
+                        className="px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-wider text-slate-950 bg-emerald-400 hover:bg-emerald-300 disabled:opacity-50 disabled:grayscale transition shadow-md shrink-0 whitespace-nowrap min-w-[100px] text-center"
+                      >
+                        {isWhatsappLoading ? `Espera... ${whatsappSeconds}s` : 'Compartir'}
+                      </button>
+                    )}
+                  </div>
+
+                  {/* MISION 2: SPONSOR GATE (Validación de Marcas de Instagram) */}
+                  <div className="p-3.5 rounded-xl border border-slate-800/80 bg-slate-900/40 flex items-center justify-between gap-4">
+                    <div className="flex items-center gap-3">
+                      <div className={`p-2 rounded-lg shrink-0 ${activeBrandStyles.glowBg} ${activeBrandStyles.textAccent}`}>
+                        <Users className="w-5 h-5 shrink-0" />
+                      </div>
+                      <div>
+                        <h5 className="text-xs font-bold text-white">Seguir Marcas Aliadas (Instagram)</h5>
+                        <p className="text-[10px] text-slate-400 col-span-2">
+                          {filteredSponsorsForRegister.length > 0 
+                            ? `Debes seguir a todos los patrocinadores vinculados. (${followedSponsors.filter(id => filteredSponsorsForRegister.some(s => s.id === id)).length}/${filteredSponsorsForRegister.length})`
+                            : 'Este torneo no tiene misiones de patrocinio.'
+                          }
+                        </p>
+                      </div>
                     </div>
                     
                     {allSponsorsFollowed ? (
                       <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 shrink-0">
                         <CheckCircle className="w-4.5 h-4.5" />
-                        <span className="text-xs font-bold uppercase tracking-wider">Listo</span>
+                        <span className="text-[10px] font-bold uppercase tracking-wider">Listo</span>
                       </div>
                     ) : (
                       <button
                         type="button"
                         onClick={() => setShowSponsorsModal(true)}
-                        className={`px-4 py-2 rounded-lg text-xs font-black uppercase tracking-wider text-white transition-all duration-300 bg-gradient-to-r ${activeBrandStyles.gradient} hover:scale-105 shadow-lg shrink-0`}
+                        className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-wider text-white transition-all duration-300 bg-gradient-to-r ${activeBrandStyles.gradient} hover:scale-105 shadow-lg shrink-0`}
                       >
                         Ver Marcas
                       </button>
@@ -1798,15 +1876,15 @@ export default function App() {
                 {/* Botón de Enviar */}
                 <button 
                   type="submit" 
-                  disabled={formStatus.type === 'loading' || !allSponsorsFollowed}
+                  disabled={formStatus.type === 'loading' || !allSponsorsFollowed || !sharedOnWhatsapp}
                   className={`w-full mt-2 bg-gradient-to-r text-slate-950 font-black tracking-wider text-sm py-4 rounded-xl shadow-lg active:scale-[0.99] transition-all duration-300 flex items-center justify-center gap-2 uppercase disabled:opacity-50 disabled:grayscale disabled:cursor-not-allowed ${activeBrandStyles.gradient} ${activeBrandStyles.hoverGradient} ${activeBrandStyles.shadowAccent}`}
                 >
                   <UserPlus className="w-5 h-5 text-slate-950" />
                   {formStatus.type === 'loading' 
                     ? 'Procesando...' 
-                    : allSponsorsFollowed 
+                    : (allSponsorsFollowed && sharedOnWhatsapp)
                       ? 'Confirmar Registro' 
-                      : 'Sigue a los Patrocinadores'
+                      : 'Cumplir misiones obligatorias'
                   }
                 </button>
               </form>
@@ -2011,7 +2089,7 @@ export default function App() {
                             <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold tracking-wider ${
                               itemBrand === 'gaming' 
                                 ? 'bg-red-950/60 text-red-400 border border-red-900/40' 
-                                : 'bg-cyan-950/60 text-cyan-400 border border-cyan-900/40'
+                                : 'bg-cyan-950/60 text-cyan-400 border-cyan-900/40'
                             }`}>
                               {itemBrand === 'gaming' ? '🎮 Gaming' : '⚽ Sport'}
                             </span>
@@ -2205,7 +2283,7 @@ export default function App() {
               </div>
             </div>
 
-            {/* Sidebar de Bombo de Participantes / Bombo de Ganadores en Nube */}
+            {/* Sidebar de Sorteo con Progreso */}
             <div className="lg:col-span-5 bg-slate-900 rounded-2xl border border-slate-800 p-6 flex flex-col justify-between shadow-2xl">
               <div>
                 {sorteoActive ? (
@@ -2217,7 +2295,7 @@ export default function App() {
                           <Award className={`w-4.5 h-4.5 ${activeBrandStyles.textAccent}`} />
                           Sorteo Acumulativo
                         </h4>
-                        <span className="bg-emerald-500 text-slate-950 text-[10px] font-black uppercase tracking-wider px-2.5 py-0.5 rounded-full animate-pulse">
+                        <span className="bg-emerald-500 text-slate-950 text-[10px] font-black uppercase tracking-wider px-2.5 py-0.5 rounded-full animate-pulse font-sans">
                           Auto-Guardado
                         </span>
                       </div>
@@ -2289,7 +2367,7 @@ export default function App() {
                       Solo las personas registradas en el torneo seleccionado ingresarán al sorteo dinámico actual.
                     </p>
 
-                    {/* Botón de Llamado a la Acción para iniciar sorteo persistente */}
+                    {/* Botón de Sorteo con Respaldo en la Nube */}
                     <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-4 text-center my-4 animate-fade-in">
                       <Sparkles className={`w-8 h-8 mx-auto mb-2 ${activeBrandStyles.textAccent} animate-pulse`} />
                       <h5 className="text-xs font-black text-white uppercase tracking-wider">Sorteo con Respaldo en la Nube</h5>
@@ -2420,14 +2498,29 @@ export default function App() {
                   </div>
                 </div>
 
+                {/* Campo de descripción */}
                 <div className="space-y-1">
                   <label className="block text-xs font-bold uppercase text-slate-400">Descripción Corta</label>
                   <textarea 
                     value={newEvent.descripcion}
                     onChange={(e) => setNewEvent(prev => ({ ...prev, descripcion: e.target.value }))}
                     placeholder="Detalles sobre premios, consolas o categorías..." 
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2.5 text-white placeholder-slate-600 focus:outline-none focus:border-cyan-400 transition text-sm h-24 resize-none"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2.5 text-white placeholder-slate-600 focus:outline-none focus:border-cyan-400 transition text-sm h-16 resize-none"
                   />
+                </div>
+
+                {/* --- NUEVO CAMPO: MENSAJE PERSONALIZADO DE WHATSAPP --- */}
+                <div className="space-y-1">
+                  <label className="block text-xs font-bold uppercase text-slate-400">Mensaje de WhatsApp para Compartir</label>
+                  <textarea 
+                    value={newEvent.mensajeWhatsapp}
+                    onChange={(e) => setNewEvent(prev => ({ ...prev, mensajeWhatsapp: e.target.value }))}
+                    placeholder="Escribe el mensaje casual. Puedes usar [Nombre del Evento] y [Link] como etiquetas para que se rellenen solos." 
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2.5 text-white placeholder-slate-600 focus:outline-none focus:border-cyan-400 transition text-xs h-20 resize-none font-sans"
+                  />
+                  <p className="text-[10px] text-slate-500 leading-tight">
+                    Si lo dejas vacío, se enviará el mensaje casual por defecto. Puedes usar <span className="text-slate-400 font-bold">[Nombre del Evento]</span> y <span className="text-slate-400 font-bold">[Link]</span>.
+                  </p>
                 </div>
 
                 <div className="flex gap-3">
@@ -2472,14 +2565,14 @@ export default function App() {
                   const registrations = participants.filter(p => p.evento === ev.nombre).length;
                   const isGaming = ev.categoria === 'gaming';
                   return (
-                    <div key={ev.id} className="bg-slate-950 border border-slate-800/80 p-4 rounded-xl flex items-center justify-between gap-4">
+                    <div key={ev.id} className="bg-slate-950 border border-slate-800/80 p-4 rounded-xl flex items-center justify-between gap-4 animate-fade-in">
                       <div>
                         <div className="flex items-center gap-2 flex-wrap">
                           <h4 className="font-bold text-sm text-white">{ev.nombre}</h4>
                           <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold tracking-wider ${
                             isGaming 
                               ? 'bg-red-950/60 text-red-400 border border-red-900/40' 
-                              : 'bg-cyan-950/60 text-cyan-400 border border-cyan-900/40'
+                              : 'bg-cyan-950/60 text-cyan-400 border-cyan-900/40'
                           }`}>
                             {isGaming ? '🎮 Gaming' : '⚽ Sport'}
                           </span>
@@ -2492,6 +2585,11 @@ export default function App() {
                           </span>
                         </div>
                         <p className="text-xs text-slate-400 mt-1">{ev.descripcion}</p>
+                        {ev.mensajeWhatsapp && (
+                          <p className="text-[11px] text-emerald-400 font-semibold mt-1 truncate max-w-sm" title={ev.mensajeWhatsapp}>
+                            💬 {ev.mensajeWhatsapp}
+                          </p>
+                        )}
                         <span className="inline-block mt-2 text-[10px] font-mono text-slate-500">
                           ID: <span className="text-slate-400">{ev.id}</span> | Creado: {ev.fechaCreado ? new Date(ev.fechaCreado).toLocaleDateString() : 'Predeterminado'}
                         </span>

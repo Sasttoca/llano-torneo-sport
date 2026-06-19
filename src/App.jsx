@@ -48,7 +48,9 @@ import {
   ChevronRight,
   ChevronsLeft,
   ChevronsRight,
-  RefreshCw
+  RefreshCw,
+  Maximize,
+  Minimize
 } from 'lucide-react';
 
 const firebaseConfig = typeof __firebase_config !== 'undefined' 
@@ -67,22 +69,6 @@ const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 
-// Eventos predeterminados con balance de categorías para la base de datos inicial
-const DEFAULT_EVENTS = [
-  { id: 'default-1', nombre: 'Sorteo de Bienvenida Llano Torneo Sport 2026', descripcion: 'Sorteo general para todos los nuevos participantes deportivos.', activo: true, categoria: 'sport', mensajeWhatsapp: '' },
-  { id: 'default-2', nombre: 'Gran Sorteo Integración Deportiva', descripcion: 'Sorteo especial del torneo de integración de fútbol.', activo: true, categoria: 'sport', mensajeWhatsapp: '' },
-  { id: 'default-3', nombre: 'Gran Campeonato EA Sports FC 26 - Llano Gaming', descripcion: 'Torneo virtual de fútbol para la consola de nueva generación.', activo: true, categoria: 'gaming', mensajeWhatsapp: '¡Ey! ¿Quién se echa un FC 26? Me acabo de inscribir al torneo de [Nombre del Evento]. Regístrese rápido aquí y jugamos: [Link]' },
-  { id: 'default-4', nombre: 'Rifa de Clausura de Torneos Gaming', descripcion: 'Evento de cierre con increíbles premios para apasionados del gaming.', activo: true, categoria: 'gaming', mensajeWhatsapp: '' }
-];
-
-// Patrocinadores predeterminados para evitar bloqueos del sponsor-gate al iniciar por primera vez
-const DEFAULT_SPONSORS = [
-  { id: 'default-sponsor-1', nombre: 'Gatorade Meta', enlace: 'https://gatorade.com', vinculacion: 'all', eventosIds: [] },
-  { id: 'default-sponsor-2', nombre: 'Llanero Gaming Store', enlace: 'https://instagram.com', vinculacion: 'all', eventosIds: [] },
-  { id: 'default-sponsor-3', nombre: 'Indeportes Meta', enlace: 'https://www.meta.gov.co', vinculacion: 'all', eventosIds: [] }
-];
-
-// Helper para sanitizar strings en el Excel corporativo
 const escapeHTML = (str) => {
   if (!str) return '';
   return str.replace(/[&<>'"]/g, 
@@ -96,7 +82,6 @@ const escapeHTML = (str) => {
   );
 };
 
-// Diccionario estático de estilos para la doble marca
 const brandStyles = {
   sport: {
     textAccent: 'text-cyan-400',
@@ -111,8 +96,8 @@ const brandStyles = {
     gradient: 'from-cyan-400 to-sky-500',
     hoverGradient: 'hover:from-cyan-300 hover:to-sky-400',
     shadowAccent: 'shadow-cyan-400/20',
-    primaryRaw: '#22d3ee', // Cyan de referencia para la Ruleta en Canvas
-    logo: 'logoSport.png', // Balón de Fútbol profesional
+    primaryRaw: '#22d3ee',
+    logo: 'logoSport.png',
     title: 'Sport',
     titleColor: 'text-cyan-400',
     glowBg: 'bg-cyan-500/10',
@@ -133,8 +118,8 @@ const brandStyles = {
     gradient: 'from-red-500 to-rose-600',
     hoverGradient: 'hover:from-red-400 hover:to-rose-500',
     shadowAccent: 'shadow-red-500/20',
-    primaryRaw: '#ef4444', // Rojo de referencia para la Ruleta en Canvas
-    logo: 'LogoGaming.png', // Consola de mandos de juego
+    primaryRaw: '#ef4444',
+    logo: 'LogoGaming.png',
     title: 'Gaming',
     titleColor: 'text-red-500',
     glowBg: 'bg-red-500/10',
@@ -145,12 +130,10 @@ const brandStyles = {
 };
 
 export default function App() {
-  // --- ESTADOS DE PATROCINADORES ---
   const [showSponsorsModal, setShowSponsorsModal] = useState(false);
   const [followedSponsors, setFollowedSponsors] = useState([]);
   const [sponsorsList, setSponsorsList] = useState([]); 
   
-  // Estado para el administrador (Nombre, Enlace, Tipo de Vinculación y Eventos Asociados)
   const [newSponsor, setNewSponsor] = useState({ 
     nombre: '', 
     enlace: '', 
@@ -174,7 +157,7 @@ export default function App() {
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
-  // --- NUEVOS ESTADOS DE ARQUITECTURA BAJO DEMANDA (PULL) ---
+  // --- ESTADOS DE ARQUITECTURA BAJO DEMANDA (PULL) ---
   const [isSyncing, setIsSyncing] = useState(false);
   const [lastSyncTime, setLastSyncTime] = useState(null);
 
@@ -184,7 +167,10 @@ export default function App() {
   const [sorteoWinners, setSorteoWinners] = useState([]);
   const [isSyncingSorteo, setIsSyncingSorteo] = useState(false);
 
-  // --- NUEVOS ESTADOS PARA VIRALIZACIÓN EN WHATSAPP ---
+  // --- NUEVO ESTADO PARA MODO PROYECCIÓN EN VIVO ---
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
+  // --- ESTADOS ESPECÍFICOS PARA COMPARTIR EN WHATSAPP ---
   const [sharedOnWhatsapp, setSharedOnWhatsapp] = useState(false);
   const [isWhatsappLoading, setIsWhatsappLoading] = useState(false);
   const [whatsappSeconds, setWhatsappSeconds] = useState(0);
@@ -224,13 +210,11 @@ export default function App() {
   // Estado para simular visualización de nombres durante el giro rápido (ruleta masiva)
   const [cyclingName, setCyclingName] = useState('');
 
-  // Determinar la marca correspondiente de un evento dado su nombre
   const getEventBrand = (eventName) => {
     const ev = events.find(e => e.nombre === eventName);
     return ev?.categoria === 'gaming' ? 'gaming' : 'sport';
   };
 
-  // Calcular la marca activa según la pestaña y la selección actual para vestir la UI
   let activeBrand = 'sport';
   if (activeTab === 'register') {
     activeBrand = getEventBrand(formData.evento);
@@ -241,13 +225,6 @@ export default function App() {
   }
   const activeBrandStyles = brandStyles[activeBrand] || brandStyles.sport;
 
-  const handleImageError = (e) => {
-    e.target.src = activeBrand === 'sport' 
-      ? 'https://images.unsplash.com/photo-1508098682722-e99c43a406b2?auto=format&fit=crop&w=150&h=150&q=80'
-      : 'https://images.unsplash.com/photo-1538481199705-c710c4e965fc?auto=format&fit=crop&w=150&h=150&q=80';
-  };
-
-  // Filtrar patrocinadores válidos según el evento elegido en el formulario de registro
   const currentRegEvent = events.find(ev => ev.nombre === formData.evento);
   const currentRegEventId = currentRegEvent?.id;
   const filteredSponsorsForRegister = sponsorsList.filter(sponsor => {
@@ -257,7 +234,6 @@ export default function App() {
     return false;
   });
 
-  // Habilitar si ya siguió todos los patrocinadores vinculados al evento actual
   const allSponsorsFollowed = filteredSponsorsForRegister.length === 0 || 
     filteredSponsorsForRegister.every(sponsor => followedSponsors.includes(sponsor.id));
 
@@ -268,23 +244,19 @@ export default function App() {
     }
   };
 
-  // Lógica para procesar la acción de compartir en WhatsApp y simular validación
   const handleWhatsappShare = () => {
     const targetEvent = events.find(ev => ev.nombre === formData.evento);
     let rawTemplate = "";
 
-    // Verificar si el evento actual posee un mensaje personalizado de WhatsApp redactado por el administrador
     if (targetEvent && targetEvent.mensajeWhatsapp && targetEvent.mensajeWhatsapp.trim() !== '') {
       rawTemplate = targetEvent.mensajeWhatsapp;
     } else {
-      // Mensaje de respaldo exacto solicitado por el cliente
       rawTemplate = "¡Qué más! Mire que me registré a esto de [Nombre del Evento], se ve muy bueno. Le dejo el link por si se quiere apuntar de una vez: [Link]";
     }
 
     const eventName = targetEvent ? targetEvent.nombre : (formData.evento || 'Llano Torneo');
     const registrationLink = window.location.origin;
 
-    // Procesar los marcadores dinámicos del mensaje
     const customMessage = rawTemplate
       .replace(/\[Nombre del Evento\]/g, eventName)
       .replace(/\[Link\]/g, registrationLink);
@@ -292,10 +264,8 @@ export default function App() {
     const text = encodeURIComponent(customMessage);
     const whatsappUrl = `https://api.whatsapp.com/send?text=${text}`;
     
-    // Abrir ventana externa a WhatsApp
     window.open(whatsappUrl, '_blank', 'noopener,noreferrer');
     
-    // Iniciar simulación de cronómetro de auditoría (Guardrail psicológico)
     setIsWhatsappLoading(true);
     let secondsLeft = 5;
     setWhatsappSeconds(secondsLeft);
@@ -318,17 +288,17 @@ export default function App() {
     try {
       const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
       const oscillator = audioCtx.createOscillator();
-      const gainNode = audioCtx.createGain();
+      const shadowGain = audioCtx.createGain();
       oscillator.type = 'sine';
       oscillator.frequency.value = freq;
-      gainNode.gain.setValueAtTime(0.1, audioCtx.currentTime);
-      gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + duration);
-      oscillator.connect(gainNode);
-      gainNode.connect(audioCtx.destination);
+      shadowGain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+      shadowGain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + duration);
+      oscillator.connect(shadowGain);
+      shadowGain.connect(audioCtx.destination);
       oscillator.start();
       oscillator.stop(audioCtx.currentTime + duration);
     } catch (e) {
-      // Ignorar bloqueos de simulación de audio de navegadores
+      // Ignorar bloqueos de API de audio
     }
   };
 
@@ -342,7 +312,12 @@ export default function App() {
     }, 100);
   };
 
-  // --- INICIALIZACIÓN DE FIREBASE Y AUTHENTICATION ---
+  const handleImageError = (e) => {
+    e.target.src = activeBrand === 'sport' 
+      ? 'https://images.unsplash.com/photo-1508098682722-e99c43a406b2?auto=format&fit=crop&w=150&h=150&q=80'
+      : 'https://images.unsplash.com/photo-1538481199705-c710c4e965fc?auto=format&fit=crop&w=150&h=150&q=80';
+  };
+
   useEffect(() => {
     const initAuth = async () => {
       try {
@@ -364,7 +339,6 @@ export default function App() {
     return () => unsubscribeAuth();
   }, []);
 
-  // --- ESCUCHA DE EVENTOS Y PATROCINADORES (REAL-TIME BAJA CONCURRENCIA) ---
   useEffect(() => {
     if (!user) return;
 
@@ -372,33 +346,19 @@ export default function App() {
 
     const unsubscribeEvents = onSnapshot(
       eventsCollectionRef,
-      async (snapshot) => {
+      (snapshot) => {
         let list = [];
         snapshot.forEach((doc) => {
           list.push({ id: doc.id, ...doc.data() });
         });
 
-        if (list.length === 0) {
-          for (const item of DEFAULT_EVENTS) {
-            const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'eventos', item.id);
-            await setDoc(docRef, { 
-              nombre: item.nombre, 
-              descripcion: item.descripcion, 
-              fechaCreado: Date.now(), 
-              activo: true,
-              categoria: item.categoria,
-              mensajeWhatsapp: item.mensajeWhatsapp || ''
-            });
-          }
-        } else {
-          list.sort((a, b) => (b.fechaCreado || 0) - (a.fechaCreado || 0));
-          setEvents(list);
-          if (formData.evento === '' && list.length > 0) {
-            setFormData(prev => ({ ...prev, evento: list[0].nombre }));
-          }
-          if (selectedRouletteEvent === '' && list.length > 0) {
-            setSelectedRouletteEvent(list[0].nombre);
-          }
+        list.sort((a, b) => (b.fechaCreado || 0) - (a.fechaCreado || 0));
+        setEvents(list);
+        if (formData.evento === '' && list.length > 0) {
+          setFormData(prev => ({ ...prev, evento: list[0].nombre }));
+        }
+        if (selectedRouletteEvent === '' && list.length > 0) {
+          setSelectedRouletteEvent(list[0].nombre);
         }
       },
       (error) => {
@@ -409,24 +369,10 @@ export default function App() {
     const sponsorsRef = collection(db, 'artifacts', appId, 'public', 'data', 'patrocinadores');
     const unsubscribeSponsors = onSnapshot(
       sponsorsRef,
-      async (snapshot) => {
+      (snapshot) => {
         const list = [];
         snapshot.forEach((doc) => list.push({ id: doc.id, ...doc.data() }));
-        
-        if (list.length === 0) {
-          for (const item of DEFAULT_SPONSORS) {
-            const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'patrocinadores', item.id);
-            await setDoc(docRef, {
-              nombre: item.nombre,
-              enlace: item.enlace,
-              vinculacion: item.vinculacion || 'all',
-              eventosIds: item.eventosIds || [],
-              creadoEn: Date.now()
-            });
-          }
-        } else {
-          setSponsorsList(list);
-        }
+        setSponsorsList(list);
       },
       (error) => console.error("Error al sincronizar patrocinadores: ", error)
     );
@@ -437,7 +383,6 @@ export default function App() {
     };
   }, [user]);
 
-  // --- SOLUCIÓN MEJORA A: IMPLEMENTACIÓN DE FUNCIÓN DE SINCRONIZACIÓN BAJO DEMANDA (PULL) ---
   const syncParticipants = async () => {
     if (!user || !isAdminAuthenticated) return;
     setIsSyncing(true);
@@ -460,7 +405,6 @@ export default function App() {
     }
   };
 
-  // Pull automático cuando el administrador entra a una pestaña de consulta de datos por primera vez
   useEffect(() => {
     const needsSync = isAdminAuthenticated && (activeTab === 'admin-list' || activeTab === 'roulette');
     if (needsSync && participants.length === 0 && !isSyncing) {
@@ -468,7 +412,6 @@ export default function App() {
     }
   }, [activeTab, isAdminAuthenticated]);
 
-  // --- SOLUCIÓN MEJORA B: PERSISTENCIA DEL ESTADO DEL SORTEO EN FIRESTORE ---
   const fetchSorteoProgreso = async () => {
     if (!user || !selectedRouletteEvent || !isAdminAuthenticated) return;
     setIsSyncingSorteo(true);
@@ -480,20 +423,17 @@ export default function App() {
         allProgress.push({ id: doc.id, ...doc.data() });
       });
 
-      // Filtrado y ordenamiento en memoria (RULE 2: Sin queries complejas)
       const filteredWinners = allProgress
         .filter(w => w.evento === selectedRouletteEvent)
         .sort((a, b) => (a.fechaGanado || 0) - (b.fechaGanado || 0));
 
       setSorteoWinners(filteredWinners);
 
-      // Si ya existen ganadores guardados en la nube, autorestauramos la sesión sorteoActive en tarima
       if (filteredWinners.length > 0) {
         setSorteoActive(true);
         const remaining = roulettePool.filter(p => !filteredWinners.some(w => w.id === p.id));
         setSorteoCandidates(remaining);
       } else if (sorteoActive) {
-        // Si no hay ganadores en la nube pero la UI está activa, reiniciamos el pool con el total actual
         setSorteoCandidates([...roulettePool]);
       }
     } catch (err) {
@@ -503,7 +443,6 @@ export default function App() {
     }
   };
 
-  // Sincronizar el progreso del sorteo cuando el administrador cambia de evento en la ruleta
   useEffect(() => {
     if (isAdminAuthenticated && activeTab === 'roulette' && selectedRouletteEvent) {
       fetchSorteoProgreso();
@@ -561,10 +500,6 @@ export default function App() {
       setFormStatus({ type: 'error', message: 'Por favor selecciona un evento válido.' });
       return;
     }
-    if (!sharedOnWhatsapp) {
-      setFormStatus({ type: 'error', message: 'Debes cumplir la misión obligatoria de compartir el evento en WhatsApp antes de registrarte.' });
-      return;
-    }
 
     const onlyLettersRegex = /^[a-zA-ZáéíóúÁÉÍÓÚñÑ\s]+$/;
     if (!onlyLettersRegex.test(formData.nombreCompleto.trim())) {
@@ -589,6 +524,11 @@ export default function App() {
 
     if (formData.celular.length !== 10) {
       setFormStatus({ type: 'error', message: 'El número de celular debe tener exactamente 10 dígitos.' });
+      return;
+    }
+
+    if (!sharedOnWhatsapp) {
+      setFormStatus({ type: 'error', message: 'Debes cumplir la misión obligatoria de compartir el evento en WhatsApp antes de registrarte.' });
       return;
     }
 
@@ -644,7 +584,6 @@ export default function App() {
       playBeep(880, 0.3);
       setFormStatus({ type: 'success', message: `¡Inscripción exitosa a "${formData.evento}"! Datos guardados.` });
       
-      // Resetear el requisito de patrocinio obligatoriamente para soporte multiusuario en un mismo dispositivo
       setFollowedSponsors([]);
       setSharedOnWhatsapp(false);
 
@@ -857,13 +796,11 @@ export default function App() {
       const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'registrados', deleteTargetId);
       await deleteDoc(docRef);
       
-      // Actualizar inmediatamente el estado local del Admin para que desaparezca sin forzar un "Sincronizar"
       setParticipants(prev => prev.filter(p => p.id !== deleteTargetId));
 
       playBeep(300, 0.2);
       triggerNotification('success', 'Participante eliminado de forma permanente.');
       
-      // Eliminar también de las listas locales del sorteo si corresponde
       if (sorteoActive) {
         setSorteoCandidates(prev => prev.filter(p => p.id !== deleteTargetId));
         setSorteoWinners(prev => prev.filter(p => p.id !== deleteTargetId));
@@ -1021,13 +958,8 @@ export default function App() {
   const [spinTime, setSpinTime] = useState(0);
   const [spinTimeTotal, setSpinTimeTotal] = useState(0);
 
-  // Pool general de participantes del evento seleccionado
   const roulettePool = participants.filter(p => p.evento === selectedRouletteEvent);
-
-  // Determinar qué pool se dibujará y sorteará en la ruleta (exclusión si el sorteo en la nube está activo)
   const activePoolForDraw = sorteoActive ? sorteoCandidates : roulettePool;
-
-  // Si supera los 50 inscritos cambia a modo "Sorteo de Alto Rendimiento"
   const isMassivePool = activePoolForDraw.length > 50;
 
   const drawRouletteWheel = () => {
@@ -1064,7 +996,6 @@ export default function App() {
     const rouletteBrand = rouletteEventObj?.categoria === 'gaming' ? 'gaming' : 'sport';
     const activeBrandColorRaw = brandStyles[rouletteBrand]?.primaryRaw || '#22d3ee';
 
-    // Limitar visualmente el dibujo a un número de segmentos premium de alto rendimiento
     const renderLength = isMassivePool ? 20 : activePoolForDraw.length;
     const arc = Math.PI / (renderLength / 2);
 
@@ -1124,7 +1055,6 @@ export default function App() {
       ctx.restore();
     }
 
-    // Botón central adaptativo
     ctx.fillStyle = '#0f172a';
     ctx.strokeStyle = activeBrandColorRaw;
     ctx.lineWidth = 4;
@@ -1146,7 +1076,6 @@ export default function App() {
     drawRouletteWheel();
   }, [startAngle, participants, selectedRouletteEvent, events, sorteoActive, sorteoCandidates, activePoolForDraw]);
 
-  // Actualizador veloz de nombres ciclando durante sorteos masivos
   useEffect(() => {
     if (!isSpinning || !isMassivePool || activePoolForDraw.length === 0) return;
     const interval = setInterval(() => {
@@ -1156,7 +1085,6 @@ export default function App() {
     return () => clearInterval(interval);
   }, [isSpinning, isMassivePool, activePoolForDraw]);
 
-  // Manejo de cambio de evento en la ruleta
   useEffect(() => {
     if (sorteoActive) {
       setSorteoActive(false);
@@ -1223,7 +1151,6 @@ export default function App() {
     const len = activePoolForDraw.length;
     if (len === 0) return;
 
-    // Sorteo matemático de alta precisión
     const winningIndex = Math.floor(Math.random() * len);
     const chosenWinner = activePoolForDraw[winningIndex];
     
@@ -1233,7 +1160,6 @@ export default function App() {
     playConfettiBeeps();
     setCyclingName('');
 
-    // --- PERSISTENCIA DEL GANADOR EN FIRESTORE EN TIEMPO REAL ---
     if (sorteoActive) {
       try {
         const progressDocId = `winner_${chosenWinner.id}_${Date.now()}`;
@@ -1249,7 +1175,6 @@ export default function App() {
 
         await setDoc(docRef, progressPayload);
 
-        // Actualizar estados reactivos locales al completarse con éxito en la nube
         setSorteoWinners(prev => [...prev, progressPayload]);
         setSorteoCandidates(prev => prev.filter(p => p.id !== chosenWinner.id));
         triggerNotification('success', `${chosenWinner.nombreCompleto} ha sido guardado permanentemente como ganador.`);
@@ -1257,7 +1182,6 @@ export default function App() {
         console.error("Error al persistir ganador: ", err);
         triggerNotification('error', 'Ganador seleccionado pero con fallas de persistencia de red.');
         
-        // Fallback local por seguridad ante micro-cortes de red
         setSorteoWinners(prev => [...prev, {
           id: chosenWinner.id,
           nombreCompleto: chosenWinner.nombreCompleto,
@@ -1270,7 +1194,6 @@ export default function App() {
     }
   };
 
-  // --- CONTROLADORES PARA GESTIÓN DEL FLUJO DEL SORTEO PERSISTENTE ---
   const handleStartSorteoSession = () => {
     if (roulettePool.length === 0) {
       triggerNotification('error', 'No hay personas registradas en este evento para iniciar un sorteo.');
@@ -1287,7 +1210,6 @@ export default function App() {
     if (!user || !selectedRouletteEvent) return;
     setIsSyncingSorteo(true);
     try {
-      // Descargamos todo el progreso para identificar qué borrar (RULE 2: Sin queries complejas)
       const progressCollectionRef = collection(db, 'artifacts', appId, 'public', 'data', 'sorteo_progreso');
       const snapshot = await getDocs(progressCollectionRef);
       
@@ -1302,7 +1224,6 @@ export default function App() {
 
       await Promise.all(deletePromises);
 
-      // Limpiamos estados locales
       setSorteoActive(false);
       setSorteoCandidates([]);
       setSorteoWinners([]);
@@ -1312,7 +1233,6 @@ export default function App() {
       console.error("Error al borrar progreso en Firestore: ", error);
       triggerNotification('error', 'Error al reiniciar progreso en la nube.');
       
-      // Reinicio local para no bloquear el evento
       setSorteoActive(false);
       setSorteoCandidates([]);
       setSorteoWinners([]);
@@ -1321,7 +1241,6 @@ export default function App() {
     }
   };
 
-  // --- LÓGICA DE FILTRADO Y PAGINACIÓN OPTIMIZADA ---
   const filteredParticipants = participants.filter(p => {
     if (selectedAdminEvent !== 'all' && p.evento !== selectedAdminEvent) return false;
     const query = searchQuery.toLowerCase();
@@ -1440,7 +1359,7 @@ export default function App() {
               </button>
 
               {isAdminAuthenticated ? (
-                <div className={`hidden sm:flex items-center gap-2 px-4 py-2 rounded-full text-xs font-bold border transition-colors ${activeBrand === 'sport' ? 'bg-cyan-600 text-white border-cyan-500' : 'bg-red-600 text-white border-red-500'}`}>
+                <div className={`hidden sm:flex items-center gap-2 px-4 py-2 rounded-full text-xs font-bold border transition-colors bg-slate-800 text-white border-slate-700`}>
                   <span className="w-2 h-2 rounded-full animate-pulse bg-white"></span>
                   Admin Activado
                 </div>
@@ -1540,10 +1459,10 @@ export default function App() {
         )}
       </header>
 
-      {/* --- Tab 1: Formulario de Registro --- */}
+      {/* Contenedor Principal */}
       <main className="flex-grow max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
         
-        {/* Widget de Servidor - Solo visible a Administradores */}
+        {/* Widget de Servidor */}
         {isAdminAuthenticated && (
           <div className="mb-6 flex flex-wrap gap-4 justify-between items-center bg-slate-900/40 p-3.5 rounded-xl border border-slate-800/80 animate-fade-in">
             <div className="flex items-center gap-2">
@@ -1568,7 +1487,7 @@ export default function App() {
 
         {/* Tab 1: Formulario de Registro */}
         {activeTab === 'register' && (
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start animate-fade-in">
             
             {/* Tarjeta Promocional adaptable */}
             <div className="lg:col-span-5 space-y-6">
@@ -1784,46 +1703,44 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* --- SECCIÓN PREMIUM: MISIONES DE VALIDACIÓN (Sponsor Gate & WhatsApp Viral) --- */}
+                {/* --- REQUISITOS DE VIRALIZACIÓN --- */}
                 <div className="mt-6 p-5 rounded-2xl border border-slate-800 bg-slate-950/60 space-y-4">
                   <h4 className="text-xs font-black tracking-widest uppercase text-slate-400 flex items-center gap-1.5 mb-1">
                     <Award className={`w-4.5 h-4.5 ${activeBrandStyles.textAccent}`} />
                     Misiones obligatorias de validación
                   </h4>
 
-                  {/* MISION 1: COMPARTIR EN WHATSAPP (Misión Viral Orgánica con Mensajes Flexibles y Únicos) */}
+                  {/* Misión de compartir en WhatsApp */}
                   <div className="p-3.5 rounded-xl border border-slate-800/80 bg-slate-900/40 flex items-center justify-between gap-4">
                     <div className="flex items-center gap-3">
                       <div className="p-2 bg-emerald-500/10 rounded-lg text-emerald-400 shrink-0">
-                        {/* SVG de WhatsApp de alta fidelidad */}
-                        <svg className="w-5 h-5 shrink-0" fill="currentColor" viewBox="0 0 24 24">
-                          <path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946C.06 5.348 5.397.01 11.968.01c3.182.001 6.176 1.24 8.426 3.49 2.25 2.25 3.486 5.246 3.484 8.425-.004 6.557-5.341 11.895-11.913 11.895-2.007-.001-3.98-.51-5.74-1.488L0 24zm6.59-4.846c1.6.95 3.111 1.459 4.807 1.46 5.482 0 9.944-4.461 9.947-9.943.001-2.654-1.034-5.148-2.915-7.031C16.59 1.758 14.1 1.72 11.97 1.72c-5.485 0-9.948 4.462-9.95 9.945-.001 1.81.474 3.58 1.378 5.111L2.43 21.687l5.217-1.373zm11.75-5.918c-.328-.164-1.94-.957-2.24-1.066-.3-.11-.518-.165-.736.164-.218.328-.846 1.066-1.037 1.285-.19.218-.382.245-.71.082-.328-.164-1.386-.51-2.64-1.449-.975-.87-1.633-1.944-1.824-2.272-.19-.328-.02-.505.145-.668.148-.148.328-.382.492-.574.164-.19.218-.328.328-.546.11-.218.055-.41-.027-.574-.082-.164-.736-1.776-1.009-2.43-.266-.64-.537-.552-.736-.552-.19 0-.41-.027-.628-.027s-.573.082-.873.41c-.3.328-1.146 1.12-1.146 2.733 0 1.613 1.173 3.17 1.337 3.388.164.218 2.31 3.528 5.596 4.952.78.339 1.39.541 1.867.692.784.25 1.5.214 2.065.13.63-.094 1.94-.793 2.213-1.558.273-.765.273-1.42.19-1.558-.083-.138-.3-.218-.628-.382z"/>
+                        <svg className="w-5 h-5 text-emerald-400" fill="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                          <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.05-.149-.469-1.13-.642-1.54-.17-.412-.34-.35-.469-.35-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.87 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.87 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.355.157 11.914c0 2.094.547 4.14 1.588 5.945L0 24l6.191-1.625a11.88 11.88 0 005.85 1.567h.005c6.554 0 11.89-5.355 11.893-11.915a11.786 11.82 0 00-3.48-8.413z" />
                         </svg>
                       </div>
                       <div>
-                        <h5 className="text-xs font-bold text-white">Recomendar Torneo (WhatsApp)</h5>
-                        <p className="text-[10px] text-slate-400">Comparte la invitación a tus amigos para validar el registro.</p>
+                        <span className="font-bold text-white block">WhatsApp</span>
+                        <span className="text-xs text-slate-400">Recomienda el torneo a tus contactos</span>
                       </div>
                     </div>
-                    
                     {sharedOnWhatsapp ? (
                       <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 shrink-0">
-                        <CheckCircle className="w-4.5 h-4.5" />
-                        <span className="text-[10px] font-bold uppercase tracking-wider">Listo</span>
+                        <CheckCircle className="w-4 h-4" />
+                        <span className="text-xs font-bold uppercase tracking-wider">Cumplido</span>
                       </div>
                     ) : (
                       <button
                         type="button"
                         onClick={handleWhatsappShare}
                         disabled={isWhatsappLoading}
-                        className="px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-wider text-slate-950 bg-emerald-400 hover:bg-emerald-300 disabled:opacity-50 disabled:grayscale transition shadow-md shrink-0 whitespace-nowrap min-w-[100px] text-center"
+                        className={`px-4 py-2 rounded-lg text-xs font-black uppercase tracking-wider text-slate-950 transition-all duration-300 shadow-md shrink-0 bg-emerald-400 hover:bg-emerald-300 disabled:opacity-50 disabled:grayscale`}
                       >
-                        {isWhatsappLoading ? `Espera... ${whatsappSeconds}s` : 'Compartir'}
+                        {isWhatsappLoading ? `Cargando... ${whatsappSeconds}s` : 'Compartir'}
                       </button>
                     )}
                   </div>
 
-                  {/* MISION 2: SPONSOR GATE (Validación de Marcas de Instagram) */}
+                  {/* Misión de patrocinadores */}
                   <div className="p-3.5 rounded-xl border border-slate-800/80 bg-slate-900/40 flex items-center justify-between gap-4">
                     <div className="flex items-center gap-3">
                       <div className={`p-2 rounded-lg shrink-0 ${activeBrandStyles.glowBg} ${activeBrandStyles.textAccent}`}>
@@ -1831,7 +1748,7 @@ export default function App() {
                       </div>
                       <div>
                         <h5 className="text-xs font-bold text-white">Seguir Marcas Aliadas (Instagram)</h5>
-                        <p className="text-[10px] text-slate-400 col-span-2">
+                        <p className="text-[10px] text-slate-400">
                           {filteredSponsorsForRegister.length > 0 
                             ? `Debes seguir a todos los patrocinadores vinculados. (${followedSponsors.filter(id => filteredSponsorsForRegister.some(s => s.id === id)).length}/${filteredSponsorsForRegister.length})`
                             : 'Este torneo no tiene misiones de patrocinio.'
@@ -1922,7 +1839,7 @@ export default function App() {
               </div>
             </div>
 
-            {/* BARRA DE ACCESO BAJO DEMANDA (Pull Architecture) */}
+            {/* BARRA DE ACCESO BAJO DEMANDA */}
             <div className="bg-slate-950/80 p-4 border-b border-slate-800/80 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
               <div className="flex items-center gap-2">
                 <RefreshCw className={`w-4.5 h-4.5 text-emerald-400 ${isSyncing ? 'animate-spin' : ''}`} />
@@ -2185,16 +2102,27 @@ export default function App() {
                 <span className={`border text-xs px-3 py-1 rounded-full font-bold uppercase tracking-wider ${activeBrand === 'sport' ? 'bg-cyan-500/10 text-cyan-400 border-cyan-800' : 'bg-red-500/10 text-red-500 border-red-800'}`}>
                   Sorteos en Directo - Llano {activeBrandStyles.title}
                 </span>
-                
-                <h3 className="text-xl font-black text-white mt-2 uppercase flex items-center justify-center gap-1.5">
-                  RULETA ELECTRÓNICA 
-                  {isMassivePool && (
-                    <span className="text-[10px] bg-amber-500 text-slate-950 px-2 py-0.5 rounded font-bold animate-pulse font-sans">MODO RENDIMIENTO</span>
-                  )}
-                  {sorteoActive && (
-                    <span className="text-[10px] bg-emerald-500 text-slate-950 px-2 py-0.5 rounded font-black tracking-wider animate-pulse font-sans">SORTEO EN LA NUBE</span>
-                  )}
-                </h3>
+
+                {/* BOTÓN PARA INICIAR EL MODO PANTALLA COMPLETA */}
+                <div className="flex justify-between items-center mt-2 px-2 gap-4">
+                  <h3 className="text-xl font-black text-white uppercase flex items-center gap-1.5">
+                    RULETA ELECTRÓNICA 
+                    {isMassivePool && (
+                      <span className="text-[10px] bg-amber-500 text-slate-950 px-2 py-0.5 rounded font-bold animate-pulse font-sans">MODO RENDIMIENTO</span>
+                    )}
+                    {sorteoActive && (
+                      <span className="text-[10px] bg-emerald-500 text-slate-950 px-2 py-0.5 rounded font-black tracking-wider animate-pulse font-sans">SORTEO EN LA NUBE</span>
+                    )}
+                  </h3>
+                  
+                  <button 
+                    onClick={() => setIsFullscreen(true)}
+                    className={`bg-slate-800 hover:bg-slate-700 text-xs font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition whitespace-nowrap border border-slate-700 ${activeBrand === 'sport' ? 'hover:text-cyan-400' : 'hover:text-red-500'}`}
+                    title="Ver en pantalla completa para proyectores o transmisión"
+                  >
+                    <Maximize className="w-4.5 h-4.5" /> Proyectar Live
+                  </button>
+                </div>
                 
                 <div className="mt-4 max-w-sm mx-auto">
                   <label className="block text-xs font-bold text-slate-400 mb-1.5 uppercase tracking-wider">
@@ -2283,8 +2211,8 @@ export default function App() {
               </div>
             </div>
 
-            {/* Sidebar de Sorteo con Progreso */}
-            <div className="lg:col-span-5 bg-slate-900 rounded-2xl border border-slate-800 p-6 flex flex-col justify-between shadow-2xl">
+            {/* Sidebar de Bombo de Participantes / Bombo de Ganadores en Nube */}
+            <div className="lg:col-span-5 bg-slate-900 rounded-2xl border border-slate-800 p-6 flex flex-col justify-between shadow-2xl animate-fade-in">
               <div>
                 {sorteoActive ? (
                   <div className="space-y-4">
@@ -2295,7 +2223,7 @@ export default function App() {
                           <Award className={`w-4.5 h-4.5 ${activeBrandStyles.textAccent}`} />
                           Sorteo Acumulativo
                         </h4>
-                        <span className="bg-emerald-500 text-slate-950 text-[10px] font-black uppercase tracking-wider px-2.5 py-0.5 rounded-full animate-pulse font-sans">
+                        <span className="bg-emerald-500 text-slate-950 text-[10px] font-black uppercase tracking-wider px-2.5 py-0.5 rounded-full animate-pulse">
                           Auto-Guardado
                         </span>
                       </div>
@@ -2316,7 +2244,7 @@ export default function App() {
                           sorteoWinners.map((winner, idx) => (
                             <div 
                               key={winner.id || idx}
-                              className="flex items-center justify-between bg-amber-500/10 border border-amber-500/30 p-2.5 rounded-lg text-xs animate-fade-in"
+                              className="flex items-center justify-between bg-amber-500/10 border border-amber-500/20 p-2.5 rounded-lg text-xs animate-fade-in"
                             >
                               <div className="font-black text-amber-200 flex items-center gap-2">
                                 <span className="bg-amber-500 text-slate-950 font-black px-1.5 py-0.5 rounded text-[9px] uppercase">
@@ -2367,7 +2295,7 @@ export default function App() {
                       Solo las personas registradas en el torneo seleccionado ingresarán al sorteo dinámico actual.
                     </p>
 
-                    {/* Botón de Sorteo con Respaldo en la Nube */}
+                    {/* Botón de Llamado a la Acción para iniciar sorteo de persistencia */}
                     <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-4 text-center my-4 animate-fade-in">
                       <Sparkles className={`w-8 h-8 mx-auto mb-2 ${activeBrandStyles.textAccent} animate-pulse`} />
                       <h5 className="text-xs font-black text-white uppercase tracking-wider">Sorteo con Respaldo en la Nube</h5>
@@ -2498,28 +2426,27 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* Campo de descripción */}
                 <div className="space-y-1">
                   <label className="block text-xs font-bold uppercase text-slate-400">Descripción Corta</label>
                   <textarea 
                     value={newEvent.descripcion}
                     onChange={(e) => setNewEvent(prev => ({ ...prev, descripcion: e.target.value }))}
                     placeholder="Detalles sobre premios, consolas o categorías..." 
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2.5 text-white placeholder-slate-600 focus:outline-none focus:border-cyan-400 transition text-sm h-16 resize-none"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2.5 text-white placeholder-slate-600 focus:outline-none focus:border-cyan-400 transition text-sm h-24 resize-none"
                   />
                 </div>
 
-                {/* --- NUEVO CAMPO: MENSAJE PERSONALIZADO DE WHATSAPP --- */}
+                {/* Mensaje de Whatsapp */}
                 <div className="space-y-1">
                   <label className="block text-xs font-bold uppercase text-slate-400">Mensaje de WhatsApp para Compartir</label>
                   <textarea 
                     value={newEvent.mensajeWhatsapp}
                     onChange={(e) => setNewEvent(prev => ({ ...prev, mensajeWhatsapp: e.target.value }))}
-                    placeholder="Escribe el mensaje casual. Puedes usar [Nombre del Evento] y [Link] como etiquetas para que se rellenen solos." 
+                    placeholder="Plantilla de invitación específica..." 
                     className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2.5 text-white placeholder-slate-600 focus:outline-none focus:border-cyan-400 transition text-xs h-20 resize-none font-sans"
                   />
                   <p className="text-[10px] text-slate-500 leading-tight">
-                    Si lo dejas vacío, se enviará el mensaje casual por defecto. Puedes usar <span className="text-slate-400 font-bold">[Nombre del Evento]</span> y <span className="text-slate-400 font-bold">[Link]</span>.
+                    Si se deja vacío se usará la plantilla por defecto. Usa <span className="text-slate-405 font-bold">[Nombre del Evento]</span> y <span className="text-slate-405 font-bold">[Link]</span>.
                   </p>
                 </div>
 
@@ -2634,7 +2561,7 @@ export default function App() {
           </div>
         )}
 
-        {/* Tab 5: Gestión de Patrocinadores (Marcas Aliadas) con soporte Multievento */}
+        {/* Tab 5: Gestión de Patrocinadores (Marcas Aliadas) */}
         {activeTab === 'sponsors' && isAdminAuthenticated && (
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-2xl animate-fade-in">
             <h3 className="text-white font-black uppercase tracking-wider mb-6 flex items-center gap-2">
@@ -2790,6 +2717,129 @@ export default function App() {
         )}
   
       </main>
+
+      {/* --- MÓDULO: PANTALLA COMPLETA EN VIVO (MODO PROYECCIÓN DE STREAMING) --- */}
+      {isFullscreen && (
+        <div className="fixed inset-0 z-50 bg-slate-950 flex flex-col p-6 animate-fade-in overflow-hidden select-none">
+          {/* Header de la Proyección en Pantalla Completa */}
+          <div className="flex items-center justify-between border-b border-slate-900 pb-4 mb-4">
+            <div className="flex items-center gap-3">
+              <div className="p-1.5 rounded-xl bg-slate-900 border border-slate-800">
+                <img 
+                  src={activeBrandStyles.logo} 
+                  alt="Logo Evento" 
+                  className="h-10 w-10 rounded-full object-cover"
+                  onError={handleImageError} 
+                />
+              </div>
+              <div>
+                <h3 className="text-md font-black uppercase tracking-wider text-white">PROYECCIÓN DE SORTEO EN EN VIVO</h3>
+                <p className="text-[10px] text-slate-500 uppercase font-semibold">{selectedRouletteEvent}</p>
+              </div>
+            </div>
+            
+            <button 
+              onClick={() => setIsFullscreen(false)}
+              className="bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs px-5 py-2.5 rounded-lg flex items-center gap-1.5 transition duration-300 active:scale-95 shadow-lg shadow-rose-600/20"
+            >
+              <Minimize className="w-4 h-4" /> Salir de Proyección
+            </button>
+          </div>
+
+          {/* Grilla Expandida para OBS y Proyectores */}
+          <div className="flex-grow grid grid-cols-1 lg:grid-cols-12 gap-8 items-center justify-center overflow-hidden">
+            {/* Ruleta Gigante en Proyección */}
+            <div className="lg:col-span-7 flex flex-col items-center justify-center relative">
+              {/* Flecha indicadora adaptable */}
+              <div className="absolute top-[18px] z-30 drop-shadow-lg animate-bounce">
+                <div className={`w-8 h-8 rotate-45 transform origin-center border-2 border-white rounded-br-md ${activeBrand === 'sport' ? 'bg-cyan-400' : 'bg-red-500'}`}></div>
+              </div>
+
+              <canvas 
+                ref={canvasRef} 
+                width="450" 
+                height="450" 
+                className="max-w-[80vw] max-h-[60vh] h-auto aspect-square rounded-full shadow-2xl bg-slate-950 border border-slate-800/80 mt-4"
+              />
+
+              {/* Ciclador o Mensaje de Acción */}
+              <div className="mt-6 w-full max-w-md bg-slate-900 border border-slate-800/80 rounded-xl p-4 text-center shadow-2xl">
+                {isMassivePool && isSpinning ? (
+                  <div>
+                    <span className="text-[9px] font-bold text-slate-500 tracking-widest block uppercase mb-1">Candidatos en Bombo</span>
+                    <p className={`text-md font-black uppercase tracking-wide truncate ${activeBrandStyles.textAccent}`}>
+                      {cyclingName}
+                    </p>
+                  </div>
+                ) : (
+                  <div>
+                    <button 
+                      onClick={spinTheWheel}
+                      disabled={isSpinning || activePoolForDraw.length === 0}
+                      className={`w-full py-2.5 rounded-lg text-xs font-black tracking-widest uppercase transition duration-300 shadow-md ${
+                        isSpinning 
+                          ? 'bg-slate-800 text-slate-500' 
+                          : activePoolForDraw.length === 0 
+                            ? 'bg-slate-800 text-slate-400'
+                            : `bg-gradient-to-r text-slate-950 ${activeBrandStyles.gradient} ${activeBrandStyles.hoverGradient}`
+                      }`}
+                    >
+                      {isSpinning ? '¡GIRANDO RÁPIDAMENTE!' : '🔥 ¡GIRAR RULETA AHORA! 🔥'}
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Sidebar de Bombo y Sorteo en Proyección */}
+            <div className="lg:col-span-5 bg-slate-900/60 border border-slate-900/80 rounded-3xl p-6 h-full flex flex-col justify-between max-h-[75vh] shadow-2xl animate-fade-in">
+              <div className="overflow-hidden flex flex-col h-full">
+                <div className="border-b border-slate-800 pb-3 flex items-center justify-between">
+                  <span className="text-white font-black text-sm uppercase tracking-wider flex items-center gap-1.5">
+                    <Trophy className={`w-5 h-5 ${activeBrandStyles.textAccent}`} />
+                    Panel de Ganadores
+                  </span>
+                  <span className="text-[10px] text-slate-500 bg-slate-950 px-2 py-0.5 rounded border border-slate-800 font-mono">
+                    Sesión Activa
+                  </span>
+                </div>
+
+                <div className="mt-4 space-y-2 overflow-y-auto flex-grow max-h-[45vh] pr-1">
+                  {sorteoWinners.length > 0 ? (
+                    sorteoWinners.map((winner, idx) => (
+                      <div 
+                        key={winner.id || idx}
+                        className="flex items-center justify-between bg-amber-500/10 border border-amber-500/20 p-3 rounded-xl text-xs animate-fade-in"
+                      >
+                        <div className="font-bold text-amber-200 flex items-center gap-2">
+                          <span className="bg-amber-500 text-slate-950 font-black px-1.5 py-0.5 rounded text-[9px] uppercase tracking-wider">
+                            GANADOR #{idx + 1}
+                          </span>
+                          {winner.nombreCompleto}
+                        </div>
+                        <span className="text-[10px] text-slate-500 font-mono">
+                          {winner.documento}
+                        </span>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="text-center py-16 text-slate-600 text-xs border border-dashed border-slate-800/80 rounded-2xl flex flex-col justify-center items-center gap-2">
+                      <Sparkles className="w-8 h-8 text-slate-700 animate-pulse" />
+                      <span>¡Gira la ruleta para elegir un ganador en vivo!</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Resumen o Botón de Control Rápido */}
+              <div className="pt-4 border-t border-slate-800/80 flex items-center justify-between text-xs text-slate-400">
+                <span>Candidatos: {activePoolForDraw.length}</span>
+                <span>Ganadores: {sorteoWinners.length}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* MODAL 1: Autenticación de Organizador */}
       {showPinModal && (
@@ -3014,7 +3064,7 @@ export default function App() {
               onClick={() => setShowSponsorsModal(false)}
               className="w-full mt-6 bg-slate-800 hover:bg-slate-700 text-white font-bold py-3 rounded-xl transition"
             >
-              Cerrar Ventana
+              <X className="w-4 h-4 mr-1.5 inline-block" /> Cerrar Ventana
             </button>
           </div>
         </div>
